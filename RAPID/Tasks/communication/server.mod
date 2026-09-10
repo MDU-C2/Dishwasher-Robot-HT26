@@ -50,10 +50,10 @@ MODULE server
         ELSEIF ERRNO=ERR_SOCK_CLOSED THEN
             ! if the socket is closed that I lissen too, return from this function
             RETURN;
-        ELSEIF ERRNO = ERR_SOCK_ADDR_INVALID THEN
-            ipAddress:="192.168.125.1";
+       ! ELSEIF ERRNO = ERR_SOCK_ADDR_INVALID THEN
+            !ipAddress:="192.168.125.1";
 
-            RETRY;
+           ! RETRY;
         ENDIF
         
     ENDPROC
