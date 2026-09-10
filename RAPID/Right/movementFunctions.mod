@@ -125,15 +125,29 @@ MODULE movementFunctions
 !     Description:  Returns the point located the given step_size away from current position towards desired position.
     
 !    ***********************************************************
-    FUNC pos discretizePosition(pos current_target,pos desired_target,num step_size)
+FUNC pos discretizePosition(pos current_target, pos desired_target, num step_size)
     
         VAR pos dir_vector;
         VAR pos return_pos;
+        VAR num magnitude;  ! Create a variable to hold the number
         
-        dir_vector := desired_target - current_target;
-        dir_vector := dir_vector / VectMagn(dir_vector);
-        return_pos := current_target + dir_vector * step_size;
-    !    return_pos := desired_target - dir_vector * step_size;
+        ! 1. Calculate the direction vector individually
+        dir_vector.x := desired_target.x - current_target.x;
+        dir_vector.y := desired_target.y - current_target.y;
+        dir_vector.z := desired_target.z - current_target.z;
+        
+        ! 2. Get the magnitude
+        magnitude := VectMagn(dir_vector);
+        
+        ! 3. Divide by the magnitude individually
+        dir_vector.x := dir_vector.x / magnitude;
+        dir_vector.y := dir_vector.y / magnitude;
+        dir_vector.z := dir_vector.z / magnitude;
+        
+        ! 4. Multiply by step size and add individually
+        return_pos.x := current_target.x + (dir_vector.x * step_size);
+        return_pos.y := current_target.y + (dir_vector.y * step_size);
+        return_pos.z := current_target.z + (dir_vector.z * step_size);
         
         RETURN return_pos;
     ENDFUNC
