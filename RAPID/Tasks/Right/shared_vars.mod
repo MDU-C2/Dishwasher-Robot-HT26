@@ -1,4 +1,4 @@
-MODULE shared_vars_module (SYSMODULE)
+MODULE shared_vars_module
     
 !    ***********************************************************
 !     Module:  shared_vars
