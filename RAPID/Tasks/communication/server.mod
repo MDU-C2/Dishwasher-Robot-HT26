@@ -19,7 +19,7 @@ MODULE server
     ! Open socket connection
     PROC server_init()
         ! port values
-        VAR string ipAddress:="192.168.125.5";
+        VAR string ipAddress:="192.168.125.5"; !127.0.0.1
         ! YuMi ip "192.168.0.1"
         VAR num port:=1025;
 

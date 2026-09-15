@@ -1,0 +1,50 @@
+MODULE YuMiLib_Params_L(SYSMODULE)
+    
+    !***************************************************************************
+    !*                              Common parameters                          *
+    !***************************************************************************
+    CONST loaddata ld_YuMiGripper_S:=[0.230,[8.2,11.7,52.0],[1,0,0,0],0.00021,0.00024,0.00009];
+    CONST loaddata ld_YuMiGripper_S_V1:=[0.248,[8.6,11.7,52.7],[1,0,0,0],0.00021,0.00024,0.00009];
+    CONST loaddata ld_YuMiGripper_S_V1_V2:=[0.280,[7.1,11.9,47.3],[1,0,0,0],0.00025,0.00029,0.00012];
+    CONST loaddata ld_YuMiGripper_S_C:=[0.244,[7.5,11.8,52.7],[1,0,0,0],0.00021,0.00023,0.00008];
+    CONST loaddata ld_YuMiGripper_S_C_V1:=[0.262,[7.8,11.9,50.7],[1,0,0,0],0.00022,0.00024,0.00009];
+
+    !**********************************
+    !**********Standard parameters needed for Camera Calibration **********************************************
+    !***Do not change these.
+    CONST string markerFinderJob:="PatternABB.job";
+    TASK PERS num HandCamera_Kinv{3,3}:=[[0,0,0],[0,0,0],[0,0,0]];
+    TASK PERS num HandCamera_K{3,3}:=[[0,0,0],[0,0,0],[0,0,0]];
+    TASK PERS tooldata tHandCamera:=[TRUE,[[-7.79332,26.2553,35.637],[0.507106,-0.492819,-0.512337,-0.487323]],[0.262,[7.8,11.9,50.7],[1,0,0,0],0.00022,0.00024,9E-05]];
+    CONST pose peDefault_tFrame_HandCamera:=[[-7.3, 28.3, 35.1], [0.5, -0.5, -0.5, -0.5]];
+    CONST pose peDefault_tFrame_ABBLogo:=[[0, -28.3, 30], [0.5, -0.5, -0.5, -0.5]];
+    TASK PERS wobjdata WObj_Vision:=[FALSE,TRUE,"",[[401.591,32.4092,0],[0.424655,-1.21554E-07,-1.90773E-07,0.905355]],[[0,0,0],[1,0,0,0]]];
+    
+    ! Predefined tools for different configurations of the Standard Smart Gripper
+	TASK PERS tooldata tGripper:=[TRUE,[[0,0,136],[1,0,0,0]],[0.230,[8.2,11.7,52],[1,0,0,0],0.00021,0.00024,0.00009]];
+	TASK PERS tooldata tVacuum1:=[TRUE,[[63.5,18.5,37.5],[0.707106781,0,0.707106781,0]],[0.248,[8.6,11.7,52.7],[1,0,0,0],0.00021,0.00024,0.00009]];
+	TASK PERS tooldata tVacuum2:=[TRUE,[[-63.5,18.5,37.5],[0.707106781,0,-0.707106781,0]],[0.280,[7.1,11.9,47.3],[1,0,0,0],0.00025,0.00029,0.00012]];
+
+    !***************************************************************************
+    !*                         Task specific paramters                         *
+    !***************************************************************************
+    
+    TASK PERS string YuMiLib_CameraName:="HandCameraL";
+
+    CONST robtarget pCamera_Calib_Near:=[[413,50,400],[0,0,0,1],[-2,-1,0,4],[110,9E+09,9E+09,9E+09,9E+09,9E+09]];
+    CONST robtarget pCamera_Calib_Far:=[[413,250,400],[0,0,0,1],[-2,0,1,4],[110,9E+09,9E+09,9E+09,9E+09,9E+09]];
+    CONST robtarget pCamera_Calib_train:=[[405,100,400],[0,0,0,1],[-2,0,1,4],[110,9E+09,9E+09,9E+09,9E+09,9E+09]];
+    
+    CONST robtarget pShowABBLogo := [[405,150.00,405],[1,0,0,0],[-1,0,-2,4],[110,9E+09,9E+09,9E+09,9E+09,9E+09]];
+    
+    TASK PERS wobjdata WObj_FollowRobR:=[FALSE,FALSE,"ROB_R",[[0, 0, 0],[1, 0, 0, 0]],[[0, 0, 0],[1, 0, 0, 0]]];
+    
+        
+    !**************************************************************************
+    !*                                Speeddata                               *
+    !**************************************************************************
+    CONST speeddata vSlow:=[100,50,5000,1000];
+    CONST speeddata vMedium:=[300,150,5000,1000];
+    CONST speeddata vFast:=v1000;
+
+ENDMODULE
