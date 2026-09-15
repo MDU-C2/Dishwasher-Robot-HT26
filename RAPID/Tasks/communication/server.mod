@@ -10,6 +10,7 @@ MODULE server
     VAR string message:="";
     VAR robtarget hand_frame;
     VAR num message_index:=-1;
+    
     VAR robtarget cup_end_frame:=[[0,0,0],[0,0,0,0],[1,1,0,0],[11,12.3,9E9,9E9,9E9,9E9]];
     ! dummy values
 
@@ -19,7 +20,7 @@ MODULE server
     ! Open socket connection
     PROC server_init()
         ! port values
-        VAR string ipAddress:="192.168.125.5"; !127.0.0.1
+        VAR string ipAddress:="192.168.125.1";!"192.168.125.5";
         ! YuMi ip "192.168.0.1"
         VAR num port:=1025;
 
@@ -50,10 +51,10 @@ MODULE server
         ELSEIF ERRNO=ERR_SOCK_CLOSED THEN
             ! if the socket is closed that I lissen too, return from this function
             RETURN;
-       ! ELSEIF ERRNO = ERR_SOCK_ADDR_INVALID THEN
-            !ipAddress:="192.168.125.1";
+        ELSEIF ERRNO = ERR_SOCK_ADDR_INVALID THEN
+            ipAddress:="192.168.125.1";!"192.168.125.1";
 
-           ! RETRY;
+            RETRY;
         ENDIF
         
     ENDPROC
@@ -81,24 +82,14 @@ MODULE server
             CASE "Get_Coordinates": 
                 sendHandCoordinates;
                 
-            CASE "Get_Orientation":
-                sendHandOrientation;
-                
             CASE "Move":
-                TPWrite("[INFO] client wants to move the arm");
-                IF (MoveRob(GetRobTarget())) THEN
-                ELSE
-                    SocketSend client_socket\Str:="[ERROR]can't reach that possition,try again";
-                ENDIF
-                
-            CASE "Grip":
-                Grip;
-                
-            CASE "Release":
-                Release;
+                Move;    
                 
             CASE "Home":
                 moveToHomeTarget;
+
+            CASE "Presentation":
+                Presentation;
                 
             CASE "Pick_Up_Sequence":
                  pickupSequence; 
@@ -111,10 +102,9 @@ MODULE server
                 
             CASE "Move_Calibration_home": 
                 calibrationMoveHome;
-                
-            CASE "EGM_movement":
-                EGMMovement;
-                
+            CASE "Presentation":
+                Presentation;
+                           
             DEFAULT:
                 TPWrite("[INFO] message from client: "+message);
                 SocketSend client_socket\Str:="default_"+message;
