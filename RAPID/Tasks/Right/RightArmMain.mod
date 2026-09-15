@@ -17,8 +17,8 @@ MODULE RightArmMain
     CONST robtarget home_target:=[[363.04,-198.14,250.65],[0.0417504,0.325274,0.761486,0.559099],[0,0,1,4],[177.611,9E+09,9E+09,9E+09,9E+09,9E+09]]; 
     
         ! used for mug manipulation      
-    CONST speeddata movement_speed := v300; ! Movement speed for robot movement
-    CONST speeddata calib_movement_speed := v500; ! Movement speed for robot movement
+    CONST speeddata movement_speed := v2000; ! Movement speed for robot movement
+    CONST speeddata calib_movement_speed := v2000; ! Movement speed for robot movement
     CONST num max_magnitude := 300;         ! Threshold for when to discretize robtarget (used in MovementProc)
     CONST num step_size := 50;             ! Step size when discretizing robtargets (used in MovementProc)
     CONST num sequence_delay := .2; ! sec
