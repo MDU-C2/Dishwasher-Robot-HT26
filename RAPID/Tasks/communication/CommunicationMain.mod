@@ -6,25 +6,22 @@ MODULE CommunicationMain
     CONST mug_vector mug_leave_pose := [[513.42,-441.85,110.96],[0,0,-1]];
     
     
-    PROC main()
-!        CONST string file_name := "Positions.txt";
-!        CONST string file_name2 := "Calib_Positions_rightarm";
-        
-        ! init all shared variables
-        shared_movement_left.wait_flag := FALSE;
-        shared_movement_right.wait_flag := FALSE;
-        shared_movement_left.flag := flag_nothing;
-        shared_movement_right.flag := flag_nothing;
-        
-        TPErase;
+PROC main()
+    ! 1. Initialize variables
+    shared_movement_left.wait_flag := FALSE;
+    shared_movement_right.wait_flag := FALSE;
+    shared_movement_left.flag := flag_nothing;
+    shared_movement_right.flag := flag_nothing;
+    
+    TPErase;
 
-!        loadCalibTargets file_name,calib_robtargets,calib_array_size;
-!        loadCalibTargets file_name2,calib_robtargets_right,39;
+    WHILE TRUE DO
+        ! 2. FIX: Call server_init first! 
+        ! This runs SocketCreate and waits for your Python script to connect.
+        server_init; 
         
-        WHILE TRUE DO !main loop
-            
-            single_client_communication; ! get and connect client communication
-        
-        ENDWHILE
-    ENDPROC
+        ! 3. Only once Python is connected does it enter this loop.
+        single_client_communication; 
+    ENDWHILE
+ENDPROC
 ENDMODULE
