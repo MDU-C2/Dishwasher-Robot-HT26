@@ -18,46 +18,27 @@ MODULE server
     VAR num position_in_file_index;
     
     ! Open socket connection
-    PROC server_init()
-        ! port values
-        VAR string ipAddress:="192.168.125.1";!"192.168.125.5";
-        ! YuMi ip "192.168.0.1"
-        VAR num port:=1025;
+PROC server_init()
+    VAR string pc_ip := "192.168.125.201";  ! IP of PC
+    VAR string robot_bind_ip := "192.168.125.1"; ! listen on all ports
+    VAR num port := 1025;
 
-        !runs once in initzilise
-        !can close socket even if they are not created!
-        SocketClose server_socket;
-        SocketClose client_socket;
+    SocketClose server_socket;
+    SocketClose client_socket;
+    SocketCreate server_socket;
     
-        WaitTime(1);
-        
-        !create sockets
-        SocketCreate server_socket;
+    ! 1. Bind to "" (Listen on all local interfaces)
+    SocketBind server_socket, robot_bind_ip, port; 
+    SocketListen server_socket;
     
-        TPWrite ipAddress;
-        TPWrite ""\Num:=port;
-        !connect client and server
-        socketBind server_socket,ipAddress,port;
-        SocketListen server_socket;
-        SocketAccept server_socket,client_socket\ClientAddress:=ipAddress;
-        TPWrite("client connected");
-
-    ERROR
-   
-        ! we use and expect errors in rapid,
-        IF ERRNO=ERR_SOCK_TIMEOUT THEN
-            ! if no client connected, try again
-            RETRY;
-        ELSEIF ERRNO=ERR_SOCK_CLOSED THEN
-            ! if the socket is closed that I lissen too, return from this function
-            RETURN;
-        ELSEIF ERRNO = ERR_SOCK_ADDR_INVALID THEN
-            ipAddress:="192.168.125.1";!"192.168.125.1";
-
-            RETRY;
-        ENDIF
-        
-    ENDPROC
+    TPWrite "Robot is waiting for ANY PC to connect...";
+    
+    ! 2. Since pc_ip is "", the robot will accept your PC (.201)
+    ! It will then WRITE "192.168.125.201" into pc_ip.
+    SocketAccept server_socket, client_socket \ClientAddress := pc_ip;
+    
+    TPWrite "Connected to: " + pc_ip;
+ENDPROC
 
     ! hold comminication while client is connected
     ! close communication if timer runs out or clinet close communication
