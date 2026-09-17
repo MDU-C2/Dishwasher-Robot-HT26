@@ -191,7 +191,7 @@ MODULE processes
         WaitUntil shared_movement_right.wait_flag=FALSE; !Wait for movement to be done
     ENDPROC
     
-PROC pickupSequence()
+    PROC pickupSequence()
         VAR mug_vector buffer;
         VAR mug_vector hand_over_pose;
         buffer := GetRobVector();
@@ -266,50 +266,6 @@ PROC pickupSequence()
         ! Reset flags
         shared_movement_left.flag := flag_nothing;
         shared_movement_right.flag := flag_nothing;
-    ENDPROC
-    
-    
-    PROC HandOverSequence()
-        
-        ! assumes left is holding the mug in right orient
-        VAR mug_vector hand_over_pose;
-        
-        WaitUntil shared_movement_right.wait_flag = FALSE;
-        WaitUntil shared_movement_left.wait_flag = FALSE;
-        
-        ! init all variables
-        hand_over_pose := [GetHandOverPos(),[0,0,-1]];
-        
-        TPWrite "hand over pos:" \Pos:= hand_over_pose.position;
-        
-        shared_movement_left.hand_over_pose := hand_over_pose;
-        shared_movement_right.hand_over_pose := hand_over_pose;
-        
-        shared_movement_left.flag := flag_hand_over;
-        shared_movement_right.flag := flag_hand_over;
-        
-        shared_movement_right.wait_flag := TRUE;
-        shared_movement_left.wait_flag := TRUE;
-        
-        ! wait until left and right arm is in right pose
-        WaitUntil shared_movement_right.wait_flag = FALSE;
-        WaitUntil shared_movement_left.wait_flag = FALSE;
-        
-        ! let right arm keep on going 
-        shared_movement_right.wait_flag := TRUE;
-        
-        ! wait until right hand hold mug
-        WaitUntil shared_movement_right.wait_flag = FALSE;
-        
-        ! let left hand release and go back
-        shared_movement_left.wait_flag := TRUE;
-        
-        ! wait until left hand moves back
-        WaitUntil shared_movement_left.wait_flag = FALSE;
-        
-        ! let right hand move back
-        shared_movement_right.wait_flag := TRUE;
-        
     ENDPROC
     
     PROC leaveSequence()

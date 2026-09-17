@@ -87,8 +87,6 @@ ENDPROC
                 
             CASE "Move_Calibration_home": 
                 calibrationMoveHome;
-            CASE "Presentation":
-                Presentation;
                            
             DEFAULT:
                 TPWrite("[INFO] message from client: "+message);
