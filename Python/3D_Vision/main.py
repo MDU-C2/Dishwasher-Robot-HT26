@@ -80,7 +80,7 @@ def local_move(orient, client, obj_list, normalized_vector, save_protocol ,file_
 
             # ADD MUG SEQUENCE HERE
 
-            client.MoveHome()
+            #client.MoveHome()
 
             client.PickUpSequence(obj_list[0], orient, normalized_vector)
             # client.Move(obj_list[0], orient, normalized_vector)
