@@ -4,7 +4,7 @@ MODULE server
     VAR socketdev server_socket;
     VAR socketdev client_socket;
 
-    CONST num delay_time:=0.2;
+    CONST num delay_time:=0.05;
 
     ! process variables
     VAR string message:="";
@@ -25,6 +25,10 @@ PROC server_init()
 
     SocketClose server_socket;
     SocketClose client_socket;
+    
+            ! Give the hardware a moment to release the port
+       ! WaitTime 0.1;
+    
     SocketCreate server_socket;
     
     ! 1. Bind to "" (Listen on all local interfaces)
@@ -98,15 +102,15 @@ ENDPROC
     ERROR
         ! if errors occure during run
         IF ERRNO=ERR_SOCK_CLOSED THEN
+            TPWrite "Connection lost. Resetting server...";
             ! clinet closed connection before sending end ack!
             server_init;
-            RETURN ;
+            RETRY;
         ELSEIF ERRNO=ERR_SOCK_TIMEOUT THEN
             SocketClose client_socket;
             ! socket never send annything, close connection and return to main
             RETURN ;
         ENDIF
     ENDPROC
-
 
 ENDMODULE

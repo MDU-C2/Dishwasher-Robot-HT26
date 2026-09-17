@@ -22,45 +22,19 @@ MODULE processes
 
 !     Description: Sets shared flag to initiate Gripper Grip in movement task.
     
-!    ***********************************************************
     PROC Grip()
-        TPWrite("[INFO] client wants to close the gripper");
-        WaitUntil shared_movement_left.wait_flag=FALSE;
-        shared_movement_left.flag:=flag_gripper_grip; 
-        shared_movement_left.wait_flag:=TRUE;
-  
-    ERROR
-        ! if errors occure during run
-        IF ERRNO=ERR_SOCK_CLOSED THEN
-            ! clinet closed connection before sending end ack!
-            server_init;
-            RETURN ;
-        ENDIF
+        TPWrite "[INFO] Gripping...";
+        WaitUntil shared_movement_left.wait_flag = FALSE;
+        shared_movement_left.flag := flag_gripper_grip; 
+        shared_movement_left.wait_flag := TRUE;
     ENDPROC
     
-    
-!    ***********************************************************
-!     Process: Release
-
-!     Description: Sets shared flag to initiate Gripper Release in movement task.
-    
-!    ***********************************************************
     PROC Release()
-        TPWrite("[INFO] client wants to open gripper");
-
-        WaitUntil shared_movement_left.wait_flag=FALSE;
-        SocketSend client_socket\Str:="AskNext";
-
-        shared_movement_left.flag:=flag_gripper_release; 
-        shared_movement_left.wait_flag:=TRUE;
-   ERROR
-        ! if errors occure during run
-        IF ERRNO=ERR_SOCK_CLOSED THEN
-            ! clinet closed connection before sending end ack!
-            server_init;
-            RETURN ;
-        ENDIF
-    ENDPROC 
+        TPWrite "[INFO] Releasing...";
+        WaitUntil shared_movement_left.wait_flag = FALSE;
+        shared_movement_left.flag := flag_gripper_release; 
+        shared_movement_left.wait_flag := TRUE;
+    ENDPROC
     
     
 !    ***********************************************************
@@ -217,34 +191,83 @@ MODULE processes
         WaitUntil shared_movement_right.wait_flag=FALSE; !Wait for movement to be done
     ENDPROC
     
-    PROC pickupSequence()
-       
+PROC pickupSequence()
         VAR mug_vector buffer;
+        VAR mug_vector hand_over_pose;
         buffer := GetRobVector();
         
-        ! if mug standing up
+        ! Ensure Z-safety
         IF abs(buffer.normal.z) < abs(buffer.normal.x) AND abs(buffer.normal.z) < abs(buffer.normal.y) THEN
-            TPWrite "mug z value: " \Num:=buffer.normal.z;
-            IF buffer.position.z < min_z_value THEN
-                buffer.position.z := min_z_value;
+            IF buffer.position.z < 65 THEN
+                buffer.position.z := 65;
             ENDIF
         ENDIF
         buffer.position.z := 65;
-        ! mug to far to the right
+
+        ! DECISION LOGIC
         IF buffer.position.y < -100 THEN
-            MoveRobMugVector buffer,FALSE;
+            ! CASE 1: Mug is on the far right. Only Right Arm works.
+            shared_movement_right.mug := buffer;
+            shared_movement_right.flag := flag_pick_up_mug;
+            shared_movement_right.wait_flag := TRUE;
+            
             WaitUntil shared_movement_right.wait_flag = FALSE;
             leaveSequence;
         ELSE
-            MoveRobMugVector buffer,TRUE;
+            ! CASE 2: Mug is center/left. Start PARALLEL handover.
+            hand_over_pose := [GetHandOverPos(), [0,0,-1]];
+            shared_movement_left.hand_over_pose := hand_over_pose;
+            shared_movement_right.hand_over_pose := hand_over_pose;
+
+            ! 1. START RIGHT ARM IMMEDIATELY
+            ! It travels to the meeting point while Left is still picking.
+            shared_movement_right.flag := flag_hand_over;
+            shared_movement_right.wait_flag := TRUE;
+
+            ! 2. START LEFT ARM PICK
+            shared_movement_left.mug := buffer; 
+            shared_movement_left.flag := flag_pick_up_mug;
+            shared_movement_left.wait_flag := TRUE;
+
+            ! 3. Wait for Left arm to finish the table pick
             WaitUntil shared_movement_left.wait_flag = FALSE;
-            HandOverSequence;
-            WaitUntil shared_movement_left.wait_flag = FALSE;
+
+            ! 4. Tell Left arm to move to meeting point
+            shared_movement_left.flag := flag_hand_over;
+            shared_movement_left.wait_flag := TRUE;
+
+            ! 5. Run the strict handshake timing
+            HandOverSyncLogic;
+            
             leaveSequence;
         ENDIF
+        
         moveToHomeTarget;
-                
     ENDPROC
+    
+        PROC HandOverSyncLogic()
+        ! A. Wait for both arms to arrive at handover offsets
+        WaitUntil shared_movement_right.wait_flag = FALSE;
+        WaitUntil shared_movement_left.wait_flag = FALSE;
+        
+        ! B. Tell Right arm to move in and GRIP
+        shared_movement_right.wait_flag := TRUE;
+        
+        ! C. Wait for Right arm to finish physical gripping
+        WaitUntil shared_movement_right.wait_flag = FALSE;
+        WaitTime 0.4; ! Mandatory physics buffer for fingers to secure
+        
+        ! D. Tell Left arm to RELEASE and move back
+        shared_movement_left.wait_flag := TRUE;
+        
+        ! E. Wait for Left arm to signal it is clear
+        WaitUntil shared_movement_left.wait_flag = FALSE;
+        
+        ! Reset flags
+        shared_movement_left.flag := flag_nothing;
+        shared_movement_right.flag := flag_nothing;
+    ENDPROC
+    
     
     PROC HandOverSequence()
         
@@ -290,19 +313,14 @@ MODULE processes
     ENDPROC
     
     PROC leaveSequence()
-        ! assumes always the right arm holding the mug!!!!
-        
+        ! Setup Right arm for dishwasher placement
         shared_movement_right.flag := flag_move_home_target;
-        shared_movement_right.mug := mug_leave_pose;
         shared_movement_right.wait_flag := TRUE;
-        
         WaitUntil shared_movement_right.wait_flag = FALSE;
         
         shared_movement_right.flag := flag_leave_mug;
         shared_movement_right.wait_flag := TRUE;
-        
         WaitUntil shared_movement_right.wait_flag = FALSE;
-        
     ENDPROC
 !    ***********************************************************
 !     Function: GetRobTarget_two
@@ -529,45 +547,52 @@ MODULE processes
     FUNC mug_vector GetRobVector()
         VAR bool sucess;
         VAR mug_vector target;
-        target:=[[611.44,-10,224.449],[0,0,1]]; ! temp
+        ! Initial dummy values
+        target:=[[611.44,-10,224.449],[0,0,1]]; 
 
-        WaitTime(delay_time);
-        SocketSend client_socket\Str:="Ask_Coordinate";
-        SocketReceive client_socket\Str:=message;
-        sucess:=rob_coordinates(message,target.position);
+        ! --- 1. COORDINATE RETRIEVAL ---
+        WaitTime(delay_time); ! Now 0.05s for speed
+        SocketSend client_socket \Str:="Ask_Coordinate";
+        SocketReceive client_socket \Str:=message;
+        
+        sucess := rob_coordinates(message, target.position);
+        
+        ! Robustness Loop: If Python sends a bad string, keep asking instead of crashing
         WHILE NOT sucess DO
-            SocketSend client_socket\Str:="[ERROR]_wrong_format,try_again(exampel[x,y,z])";
+            SocketSend client_socket \Str:="[ERROR]_wrong_format,try_again(exampel[x,y,z])";
             WaitTime(delay_time);
-            SocketSend client_socket\Str:="Ask_Coordinate";
-
-            SocketReceive client_socket\Str:=message;
-            
-            sucess:=rob_coordinates(message,target.position);
+            SocketSend client_socket \Str:="Ask_Coordinate";
+            SocketReceive client_socket \Str:=message;
+            sucess := rob_coordinates(message, target.position);
         ENDWHILE
-        TPWrite "Recieved pos(GetRobTarget):"\Pos:=target.position;
-        SocketSend client_socket\Str:="Ack_Coordinate";
+        
+        TPWrite "Recieved pos:" \Pos:=target.position;
+        SocketSend client_socket \Str:="Ack_Coordinate";
         WaitTime(delay_time);
         
+        ! --- 2. NORMAL VECTOR RETRIEVAL ---
+        SocketSend client_socket \Str:="Ask_MugNormal";
+        SocketReceive client_socket \Str:=message;
         
-        SocketSend client_socket\Str:="Ask_MugNormal";
+        sucess := rob_coordinates(message, target.normal);
 
-        SocketReceive client_socket\Str:=message;
-        sucess:=rob_coordinates(message,target.normal);
-
+        ! Robustness Loop for Normal Vector
         WHILE NOT sucess DO
-            SocketSend client_socket\Str:="[ERROR]_wrong_format,try_again(exampel[q1,q2,q3,q4])";
+            SocketSend client_socket \Str:="[ERROR]_wrong_format,try_again(exampel[q1,q2,q3,q4])";
             WaitTime(delay_time);
-            SocketSend client_socket\Str:="Ask_MugNormal";
-
-            SocketReceive client_socket\Str:=message;
-            sucess:=rob_coordinates(message,target.normal);
+            SocketSend client_socket \Str:="Ask_MugNormal";
+            SocketReceive client_socket \Str:=message;
+            sucess := rob_coordinates(message, target.normal);
         ENDWHILE
+        
         WaitTime(delay_time);
-
         RETURN target;
+
     ERROR
         IF ERRNO = ERR_SOCK_CLOSED THEN
+            ! If the cable is pulled or Python crashes, don't just stop-close the socket cleanly.
             SocketClose client_socket;
+            ! In production, you might want to call server_init here to wait for a reconnect.
         ENDIF
     ENDFUNC
     
