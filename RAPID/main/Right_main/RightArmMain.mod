@@ -25,9 +25,10 @@ MODULE RightArmMain
     CONST robtarget cup_target := [[499.548,-110.253,-46.3938],[0.0565402,0.114235,0.990146,-0.0580089],[-2,-3,-1,4],[-177.807,9E+09,9E+09,9E+09,9E+09,9E+09]]; ! start value
         
     CONST speeddata movement_speed := v500; ! Movement speed for robot movement
-    CONST speeddata pick_speed := v200;
+    CONST speeddata transit_speed := v1000; ! in between positions
+    CONST speeddata pick_speed := v800;
     CONST num max_magnitude := 300;         ! Threshold for when to discretize robtarget (used in MovementProc)
-    CONST num step_size := 50;             ! Step size when discretizing robtargets (used in MovementProc)
+    CONST num step_size := 150;             ! Step size when discretizing robtargets (used in MovementProc)
         
         ! used in basic movement
     CONST num x_offset := 10;                
@@ -85,8 +86,8 @@ MODULE RightArmMain
                 EGMfollowCup;
                 
             CASE flag_move_calibration:
-
-                MoveJ calib_home_target,movement_speed,fine,tGripper;
+              ! Change 'fine' to 'z100' for the first move so it doesn't stop at the home target
+              MoveJ calib_home_target, movement_speed, z100, tGripper;
                 
                 IF shared_movement_right.target.trans.z < 60 THEN
                     shared_movement_right.target.trans.z := 60;
@@ -100,7 +101,7 @@ MODULE RightArmMain
                 
             CASE flag_move_calibration_outofway: ! Position so as not to disturn calibration process
 
-                MoveJ calib_target_outofway,movement_speed,fine,tGripper;
+                MoveJ calib_target_outofway,transit_speed,z100,tGripper;
 
             CASE flag_pick_up_mug: ! pick up mug sequence
             
