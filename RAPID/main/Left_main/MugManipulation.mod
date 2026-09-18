@@ -41,7 +41,7 @@ MODULE MugManipulation
 !        MovementProc target,step_size,max_magnitude,movement_speed;
         
         ! grippers in
-        WaitTime(1);
+        WaitTime(0.2); ! 1s
         
         g_GripIn;
         
@@ -49,55 +49,74 @@ MODULE MugManipulation
 !        moveL Offs(target,0,0,30),movement_speed,z50,tGripper;
         WaitTime(0.2);
         target.trans := mug_position - offset_dir*offset_lenght + [0,0,1]*offset_z_when_fetching;
-        moveL target,movement_speed,z50,tGripper;
+        moveL target,vmax,z100,tGripper;
 !        MovementProc target,step_size,max_magnitude,movement_speed;
         
     ENDPROC
     
   
-    PROC handOverSequence()
+PROC handOverSequence()
         VAR robtarget target;
         VAR pos offset_dir;
-        VAR jointtarget joints;
-        
-
-        ! get right pose
+        VAR pos target_pos;
+       
+        ! 1. Initialize data
         target := CRobT(\Tool := tGripper);
-        WaitTime 1;
-        joints := CJointT();
-        joints.robax.rax_6:=0;
+        target.rot := MugHandOverOrient();
         
-!        MoveAbsJ joints, movement_speed,fine,tGripper;
-        moveToHomeTarget;
-        target.rot := MugHandOverOrient(); ! should add normal
-        
-        offset_dir := RotatePointUsingQuaternion([0,0,1],target.rot);
+        offset_dir := RotatePointUsingQuaternion([0,0,1], target.rot);
         offset_dir.x := Round(offset_dir.x \Dec:=4);
         offset_dir.y := Round(offset_dir.y \Dec:=4);
         offset_dir.z := Round(offset_dir.z \Dec:=4);
         
-        target.trans := shared_movement_left.hand_over_pose.position - offset_dir*gripper_offset;
         ConfJ \Off;
         
-        ! move to right pose
-!        moveJ target,movement_speed,z50,tGripper;
-        MovementProc target,step_size,max_magnitude,movement_speed;
-        shared_movement_left.wait_flag := FALSE;
-        
-        ! wait for right arm
-        WaitUntil shared_movement_left.wait_flag = TRUE;
-        
-        ! open gripper and move back
-        
-        g_GripOut;
-        
-        
-        WaitTime(.2);
-        target.trans := target.trans - offset_dir*(pick_offset+gripper_offset);
-        moveL target,movement_speed,z50,tGripper;
-!        MovementProc target,50,max_magnitude,movement_speed;
-        
-        
+        ! 2. Role-based Logic
+        IF (RobName() = "ROB_R") THEN
+            ! ===========================================================
+            ! RECEIVER ROLE (RIGHT ARM)
+            ! ===========================================================
+            target_pos := shared_movement_right.hand_over_pose.position;
+
+            ! Move to offset "Waiting position"
+            target.trans := target_pos - 150*offset_dir;
+            MovementProc target, step_size, max_magnitude, movement_speed;
+            
+            g_GripOut; 
+            shared_movement_right.wait_flag := FALSE; ! Signal: "Arrived at meeting point"
+            
+            WaitUntil shared_movement_right.wait_flag = TRUE; ! Wait for Grip command
+            
+            target.trans := target_pos;
+            MoveL target, movement_speed, fine, tGripper;
+            
+            g_GripIn;
+            WaitTime 0.4; 
+            shared_movement_right.wait_flag := FALSE; ! Signal: "I HAVE THE MUG"
+
+        ELSE
+            ! ===========================================================
+            ! GIVER ROLE (LEFT ARM)
+            ! ===========================================================
+            target_pos := shared_movement_left.hand_over_pose.position;
+
+            ! --- FIX: Assign pos to target.trans before moving ---
+            target.trans := target_pos;
+            MovementProc target, step_size, max_magnitude, movement_speed;
+            
+            shared_movement_left.wait_flag := FALSE; ! Signal: "Holding mug ready"
+            
+            WaitUntil shared_movement_left.wait_flag = TRUE; ! Wait for Release command
+            
+            g_GripOut;
+            WaitTime 0.2; 
+            
+            ! Move back away
+            target.trans := target.trans - offset_dir*150;
+            MoveL target, movement_speed, z50, tGripper;
+            
+            shared_movement_left.wait_flag := FALSE; ! Signal: "I am clear"
+        ENDIF
     ENDPROC
         
     ! leave mug
