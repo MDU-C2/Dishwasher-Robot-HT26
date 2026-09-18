@@ -1,8 +1,6 @@
 MODULE MugManipulation
-    ! ===========================================================
-    ! Corrected for Type Mismatches and Task-Scope Errors
-    ! ===========================================================
 
+    ! fetch up mug
     PROC FetchMug(pos mug_position, num offset_lenght, pos mug_normal)
         VAR robtarget target;
         VAR orient hand_rotation;
@@ -10,68 +8,81 @@ MODULE MugManipulation
 
         hand_rotation := NormalToOrientationSemiOptimal(mug_position,mug_normal);
         offset_dir := RotatePointUsingQuaternion([0,0,1],hand_rotation);
-        target := CRobT(\Tool := tGripper);
-        
-        mug_position := mug_position + [0,0,1]*zOffset(mug_normal) + ([1,0,0]*x_offset + [0,1,0]*y_offset +[0,0,1]*z_offset);
-        target.rot := hand_rotation;
-        target.trans := mug_position - offset_dir*100;
-
-        MovementProc target, step_size, max_magnitude, movement_speed;
-        g_GripOut;
-        WaitTime 0.1;
-                
-        target.trans := mug_position + offset_dir*gripper_offset;
-        MoveL target, movement_speed, z50, tGripper;
-        
-        g_GripIn;
-        WaitTime 0.2;
-        
-        target.trans := mug_position - offset_dir*offset_lenght + [0,0,1]*offset_z_when_fetching;
-        MoveL target, vmax, z100, tGripper;
-    ENDPROC
-    
-    PROC handOverSequence()
-        VAR robtarget target;
-        VAR pos offset_dir;
-        VAR pos target_pos;
-       
-        target := CRobT(\Tool := tGripper);
-        target.rot := MugHandOverOrient();
-        
-        offset_dir := RotatePointUsingQuaternion([0,0,1], target.rot);
         offset_dir.x := Round(offset_dir.x \Dec:=4);
         offset_dir.y := Round(offset_dir.y \Dec:=4);
         offset_dir.z := Round(offset_dir.z \Dec:=4);
         
+        target := CRobT(\Tool := tGripper);
+        ConfJ \Off;
+
+        mug_position := mug_position + [0,0,1]*zOffset(mug_normal) + ([1,0,0]*x_offset + [0,1,0]*y_offset +[0,0,1]*z_offset);
+        
+        target.rot := hand_rotation;
+        target.trans := mug_position - offset_dir*offset_lenght;
+
+        MovementProc target,step_size,max_magnitude,movement_speed;
+        
+        ! Open fully
+        g_GripOut;
+        WaitTime(0.2);
+        
+        ! Move to pick
+        target.trans := mug_position + offset_dir*gripper_offset;
+        moveL target,movement_speed,z50,tGripper;
+        
+        ! Grip (expects to hit the object)
+        g_GripIn \HoldForce:=20;
+        WaitTime(0.3); 
+        
+        ! Retreat
+        target.trans := mug_position - offset_dir*offset_lenght + [0,0,1]*offset_z_when_fetching;
+        moveL target,vmax,z100,tGripper;
+    ENDPROC
+    
+  
+    PROC handOverSequence()
+        VAR robtarget target;
+        VAR pos offset_dir;
+        VAR pos target_pos;
+        ! Stagger height to prevent grippers from hitting each other
+        CONST num handover_z_offset := -40; 
+       
+        target := CRobT(\Tool := tGripper);
+        target.rot := MugHandOverOrient();
+        offset_dir := RotatePointUsingQuaternion([0,0,1], target.rot);
+        
         ConfJ \Off;
         
-        ! ===========================================================
-        ! FIX FOR REFERENCE ERROR: 
-        ! Use task-specific variables so the compiler stays happy
-        ! ===========================================================
         IF (RobName() = "ROB_R") THEN
-            ! This block only compiles correctly if shared_movement_right is in T_ROB_R
+            ! ===========================================================
+            ! RECEIVER ROLE (RIGHT ARM) - GRIPS THE TOP
+            ! ===========================================================
             target_pos := shared_movement_right.hand_over_pose.position;
+            target_pos.z := target_pos.z + handover_z_offset;
 
             target.trans := target_pos - 150*offset_dir;
             MovementProc target, step_size, max_magnitude, movement_speed;
             
+            ! USE STANDARD OPEN
             g_GripOut; 
             shared_movement_right.wait_flag := FALSE; 
             
             WaitUntil shared_movement_right.wait_flag = TRUE; 
             
+            ! Move in to catch the RIM
             target.trans := target_pos;
             MoveL target, movement_speed, fine, tGripper;
             
-            g_GripIn;
-            WaitTime 0.4; 
+            ! USE STANDARD GRIP (safe if it hits the cup)
+            g_GripIn \HoldForce:=20;
+            WaitTime 0.3; 
             shared_movement_right.wait_flag := FALSE; 
 
         ELSE
-            ! This block only compiles correctly if shared_movement_left is in T_ROB_L
+            ! ===========================================================
+            ! GIVER ROLE (LEFT ARM) - GRIPS THE BODY
+            ! ===========================================================
             target_pos := shared_movement_left.hand_over_pose.position;
-
             target.trans := target_pos;
             MovementProc target, step_size, max_magnitude, movement_speed;
             
@@ -79,9 +90,11 @@ MODULE MugManipulation
             
             WaitUntil shared_movement_left.wait_flag = TRUE; 
             
+            ! USE STANDARD OPEN
             g_GripOut;
-            WaitTime 0.2; 
+            WaitTime 0.1;
             
+            ! Retreat
             target.trans := target.trans - offset_dir*150;
             MoveL target, movement_speed, z50, tGripper;
             
@@ -89,30 +102,36 @@ MODULE MugManipulation
         ENDIF
     ENDPROC
         
-    PROC LeaveMug(pos mug_end_position, pos mug_end_normal, num offset_lenght)
+    ! leave mug
+   PROC LeaveMug(pos mug_end_position, pos mug_end_normal, num offset_lenght)
         VAR robtarget target;
         VAR orient hand_rotation;
         VAR pos offset;
         
         hand_rotation := NormalToOrientationSemiOptimal(mug_end_position,mug_end_normal);
-        offset := [0,0,1]*offset_lenght + ([1,0,0]*x_offset + [0,1,0]*y_offset + [0,0,1]*z_offset);
+        offset := [0,0,1]*offset_lenght; 
         target := CRobT(\Tool := tGripper);
-       
+        ConfJ \Off;
+
         target.rot := hand_rotation;
         target.trans := mug_end_position + offset;
-        MovementProc target, step_size, max_magnitude, movement_speed;
-                
-        target.trans := mug_end_position;
-        MoveL target, movement_speed, fine, tGripper;
+        MovementProc target,step_size,max_magnitude,movement_speed;
+        WaitTime(0.2);
         
+        ! Lower to placement
+        target.trans := mug_end_position;
+        moveL target,movement_speed,z50,tGripper;
+        
+        ! Open fully
         g_GripOut;
-        WaitTime 0.2;
-
-        ! --- FIX FOR TYPE MISMATCH: Use 'target' (robtarget) instead of 'mug_end_position' (pos) ---
-        MoveL Offs(target, 0, 0, 100), movement_speed, z50, tGripper;
-    ENDPROC
+        WaitTime(0.2);
+        
+        ! Retreat straight up
+        target.trans := mug_end_position + offset;
+        moveL target,movement_speed,z50,tGripper;
+   ENDPROC
    
-    PROC LeaveMugV2()
+       PROC LeaveMugV2()
         VAR robtarget end_target;
         end_target := [[513.42,-441.85,110.96],[0.353418,-0.368452,0.597902,-0.617941],[1,1,1,4],[-179.943,9E+09,9E+09,9E+09,9E+09,9E+09]];
         
@@ -125,4 +144,5 @@ MODULE MugManipulation
         
         MoveL end_target, movement_speed, fine, tGripper;
    ENDPROC
+    
 ENDMODULE
