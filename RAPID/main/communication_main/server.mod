@@ -67,14 +67,14 @@ ENDPROC
             CASE "Get_Coordinates": 
                 sendHandCoordinates;
                 
-            CASE "Move":
-                Move;    
+           ! CASE "Move":
+                !Move;    
                 
             CASE "Home":
                 moveToHomeTarget;
 
-            CASE "Presentation":
-                Presentation;
+          !  CASE "Presentation":
+             !   Presentation;
                 
             CASE "Pick_Up_Sequence":
                  pickupSequence; 
