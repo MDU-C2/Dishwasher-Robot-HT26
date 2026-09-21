@@ -29,7 +29,7 @@ MODULE MugManipulation
         moveL target,movement_speed,z50,tGripper;
         
         g_GripIn \HoldForce:=20;
-        WaitTime(0.3); 
+    !    WaitTime(0.3); 
         
         target.trans := mug_position - offset_dir*offset_lenght + [0,0,1]*offset_z_when_fetching;
         moveL target,vmax,z100,tGripper;
@@ -63,9 +63,9 @@ MODULE MugManipulation
             target.trans := target_pos;
             MoveL target, movement_speed, fine, tGripper;
             
-            WaitTime 0.2; 
+          !  WaitTime 0.2; 
             g_GripIn \HoldForce:=20;
-            WaitTime 0.3; 
+            WaitTime 0.1; 
             shared_movement_right.wait_flag := FALSE; 
 
         ELSE
@@ -78,7 +78,7 @@ MODULE MugManipulation
             WaitUntil shared_movement_left.wait_flag = TRUE; 
             
             g_GripOut;
-            WaitTime 0.1;
+           ! WaitTime 0.1;
             
             target.trans := target.trans - offset_dir*150;
             MoveL target, movement_speed, z50, tGripper;
