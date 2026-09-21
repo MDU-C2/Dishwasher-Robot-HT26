@@ -20,13 +20,13 @@ MODULE MugManipulation
         target.rot := hand_rotation;
         target.trans := mug_position - offset_dir*offset_lenght;
 
-        MovementProc target,step_size,max_magnitude,movement_speed;
+        MovementProc target,step_size,max_magnitude,v1500; !movement speed
         
         g_GripOut;
         WaitTime(0.2);
         
         target.trans := mug_position + offset_dir*gripper_offset;
-        moveL target,movement_speed,z50,tGripper;
+        moveL target,v1500,z50,tGripper; ! v1500 movement speed
         
         g_GripIn \HoldForce:=20;
     !    WaitTime(0.3); 
@@ -153,6 +153,8 @@ MODULE MugManipulation
         ! Define the upward normal [X=0, Y=0, Z=1]
         VAR pos upward_normal := [0,0,1];
         
+        mug_end_position := [620.42, -200.85, 110.96];
+        
         ! 1. Calculate orientation for the mug to be upright
         ! We use SemiOptimal to ensure the YuMi's elbow stays away from its body
         hand_rotation := NormalToOrientationSemiOptimal(mug_end_position, upward_normal);
@@ -166,7 +168,7 @@ MODULE MugManipulation
         target.trans := mug_end_position + [0, 0, offset_height];
         
         ! Use MovementProc to handle the transition and avoid joint flips
-        MovementProc target, step_size, max_magnitude, movement_speed;
+        MovementProc target, step_size, max_magnitude, v1500; ! leave mug at v1500 movement speed
         
         ! 3. Lower to the final placement position
         target.trans := mug_end_position;

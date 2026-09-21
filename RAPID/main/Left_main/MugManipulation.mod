@@ -100,7 +100,7 @@ MODULE MugManipulation
         ! 1. Move to hover position
         target.rot := hand_rotation;
         target.trans := mug_end_position + offset;
-        MovementProc target,step_size,max_magnitude,movement_speed;
+        MovementProc target,step_size,max_magnitude,v1500; ! movement speed
         
         ! 2. ADDITIONAL ROTATION: Spin 90 degrees around Tool Z before dropping
         target.rot := target.rot * OrientZYX(90, 0, 0);

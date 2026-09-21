@@ -255,13 +255,14 @@ MODULE processes
         
         ! C. Wait for Right arm to finish physical gripping
       !  WaitUntil shared_movement_right.wait_flag = FALSE;
-        WaitTime 1.15; ! Mandatory physics buffer for fingers to secure
+        WaitTime 1.15; ! buffer for right to have gripped
         
         ! D. Tell Left arm to RELEASE and move back
         shared_movement_left.wait_flag := TRUE;
         
         ! E. Wait for Left arm to signal it is clear
-        WaitUntil shared_movement_left.wait_flag = FALSE;
+       ! WaitUntil shared_movement_left.wait_flag = FALSE;
+       WaitTime 1.2;
         
         ! Reset flags
         shared_movement_left.flag := flag_nothing;
