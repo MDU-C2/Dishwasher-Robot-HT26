@@ -26,7 +26,7 @@ MODULE MugManipulation
         WaitTime(0.2);
         
         target.trans := mug_position + offset_dir*gripper_offset;
-        moveL target,movement_speed,z50,tGripper;
+        moveL target,movement_speed,fine,tGripper;
         
         g_GripIn \HoldForce:=20;
         WaitTime(0.3); 

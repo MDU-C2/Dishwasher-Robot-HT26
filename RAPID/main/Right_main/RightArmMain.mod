@@ -24,9 +24,9 @@ MODULE RightArmMain
     CONST pos sholder_pos_far := [200,-400,460];
     CONST robtarget cup_target := [[499.548,-110.253,-46.3938],[0.0565402,0.114235,0.990146,-0.0580089],[-2,-3,-1,4],[-177.807,9E+09,9E+09,9E+09,9E+09,9E+09]]; ! start value
         
-    CONST speeddata movement_speed := v1000; ! Movement speed for robot movement
-    CONST speeddata transit_speed := v1500; ! in between positions
-    CONST speeddata pick_speed := v800;
+    CONST speeddata movement_speed := v800; ! Movement speed for robot movement v1000
+    CONST speeddata transit_speed := v1500; ! in between positions 
+    CONST speeddata pick_speed := v400; ! v400
     CONST num max_magnitude := 300;         ! Threshold for when to discretize robtarget (used in MovementProc)
     CONST num step_size := 150;             ! Step size when discretizing robtargets (used in MovementProc)
         
@@ -108,8 +108,10 @@ MODULE RightArmMain
                 FetchMug shared_movement_right.mug.position,pick_offset,shared_movement_right.mug.normal;  
                 
             CASE flag_leave_mug: ! leave mug sequence
-
-                LeaveMugV2;
+                            
+                            ! Use the new Upright logic. 
+                            ! We pass the position from shared variables and a 100mm hover offset.
+                            LeaveMugUpright shared_movement_right.mug.position, 100;
                 
             CASE flag_hand_over: ! hand over sequence
                 
