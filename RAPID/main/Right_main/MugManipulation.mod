@@ -63,6 +63,7 @@ MODULE MugManipulation
             target.trans := target_pos;
             MoveL target, movement_speed, fine, tGripper;
             
+            WaitTime 0.2; 
             g_GripIn \HoldForce:=20;
             WaitTime 0.3; 
             shared_movement_right.wait_flag := FALSE; 
@@ -144,5 +145,39 @@ MODULE MugManipulation
         ! 4. Retreat
         MoveL end_target, movement_speed, fine, tGripper;
    ENDPROC
+   
+       ! New procedure to place the mug opening-up
+    PROC LeaveMugUpright(pos mug_end_position, num offset_height)
+        VAR robtarget target;
+        VAR orient hand_rotation;
+        ! Define the upward normal [X=0, Y=0, Z=1]
+        VAR pos upward_normal := [0,0,1];
+        
+        ! 1. Calculate orientation for the mug to be upright
+        ! We use SemiOptimal to ensure the YuMi's elbow stays away from its body
+        hand_rotation := NormalToOrientationSemiOptimal(mug_end_position, upward_normal);
+        
+        target := CRobT(\Tool := tGripper);
+        ConfJ \Off;
+        ConfL \Off;
+
+        ! 2. Move to hover position above the destination
+        target.rot := hand_rotation;
+        target.trans := mug_end_position + [0, 0, offset_height];
+        
+        ! Use MovementProc to handle the transition and avoid joint flips
+        MovementProc target, step_size, max_magnitude, movement_speed;
+        
+        ! 3. Lower to the final placement position
+        target.trans := mug_end_position;
+        MoveL target, movement_speed, fine, tGripper;
+        
+        ! 4. Release the mug
+        g_GripOut;
+        WaitTime 0.2;
+        
+        ! 5. Retreat straight up
+        MoveL Offs(target, 0, 0, offset_height), movement_speed, z50, tGripper;
+    ENDPROC
     
 ENDMODULE
