@@ -111,7 +111,10 @@ MODULE RightArmMain
                             
                             ! Use the new Upright logic. 
                             ! We pass the position from shared variables and a 100mm hover offset.
-                            LeaveMugUpright shared_movement_right.mug.position, 100;
+                           ! LeaveMugUpright shared_movement_right.mug.position, 100;
+                            
+                            ! Use the position that the Sequencer just received from Python
+                            LeaveMugUprightV2 shared_movement_right.mug.position, 100;
                 
             CASE flag_hand_over: ! hand over sequence
                 
