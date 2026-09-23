@@ -115,6 +115,36 @@ def run():
     robot_file = 'robo_coords.txt' # Path to robot coordinates .txt file
     client = Communication()
     
+
+
+
+
+
+
+        # 5. DEFINE THE DYNAMIC SLOT LOGIC
+    def find_empty_slot_in_dishwasher():
+        """
+        This function is triggered automatically when the robot 
+        sends the 'Ask_LeavePosition' message.
+        """
+        # OPTION A: Retrieve from your 2D camera script
+        # slot = dw.get_next_empty_slot() 
+        
+        # OPTION B: Hardcoded test coordinate
+        slot = [150.0, -380.0, 85.0] 
+        
+        print(f"[DYNAMIC] Sending free slot to robot: {slot}")
+        return slot
+
+    # 6. ATTACH THE LOGIC TO THE CLIENT
+    client.get_free_slot_logic = find_empty_slot_in_dishwasher
+
+
+
+
+
+
+
     
     
     
