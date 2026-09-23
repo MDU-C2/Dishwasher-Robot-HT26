@@ -242,7 +242,7 @@ MODULE processes
             leaveSequence;
         ENDIF
         
-        moveToHomeTarget;
+      !  moveToHomeTarget;
     ENDPROC
     
         PROC HandOverSyncLogic()
@@ -255,14 +255,15 @@ MODULE processes
         
         ! C. Wait for Right arm to finish physical gripping
       !  WaitUntil shared_movement_right.wait_flag = FALSE;
-        WaitTime 1.15; ! buffer for right to have gripped
+        WaitTime 2.4; ! buffer for right to have gripped !1.15 for all except glass. 1.4 for small glass
         
         ! D. Tell Left arm to RELEASE and move back
         shared_movement_left.wait_flag := TRUE;
         
         ! E. Wait for Left arm to signal it is clear
-       ! WaitUntil shared_movement_left.wait_flag = FALSE;
-       WaitTime 1.2;
+      !  WaitUntil shared_movement_left.wait_flag = FALSE;
+        WaitTime 1;
+      ! WaitTime 2.2; ! 1.2 for paper mug
         
         ! Reset flags
         shared_movement_left.flag := flag_nothing;

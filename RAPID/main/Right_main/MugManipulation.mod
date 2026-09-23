@@ -151,9 +151,9 @@ MODULE MugManipulation
         VAR robtarget target;
         VAR orient hand_rotation;
         ! Define the upward normal [X=0, Y=0, Z=1]
-        VAR pos upward_normal := [0,0,1];
+        VAR pos upward_normal := [0,0,-1];
         
-        mug_end_position := [620.42, -200.85, 110.96];
+        mug_end_position := [692.0, -424.0, 175.06];
         
         ! 1. Calculate orientation for the mug to be upright
         ! We use SemiOptimal to ensure the YuMi's elbow stays away from its body
