@@ -6,7 +6,6 @@ import time
 from updated_communication import Communication
 import camera_setup as cs
 import test_protocol as tp
-import tray_camera
 import threading
 #==================================== THREADING SETUP ====================================
 global busy, times_sec, count
@@ -72,171 +71,30 @@ def build_homogeneous(rotation_matrix, translation_vector):
     return T_camera_to_base_effector
 
 #Thread function to move robot to specified coordinates
-def local_move( orient, client, obj_list, normalized_vector, save_protocol, file_path, conf=None, label=None):
-
+def local_move(orient, client, obj_list, normalized_vector, save_protocol ,file_path, conf=None, label=None):
     global busy, times_sec, count
-
     with lock:
+        if busy != True:
+            start_time = time.time()
+            busy = True
 
-        if busy:
-            return
-
-        start_time = time.time()
-
-        busy = True
-
-        try:
-
-            chosen_slot = None
-
-            try:
-
-                free_slots = tray_camera.get_free_slots()
-
-                print(
-                    f"[TRAY] Free slots: {free_slots}"
-                )
-
-                chosen_slot = next(
-                    (
-                        name
-                        for name, state
-                        in free_slots.items()
-                        if state == "free"
-                    ),
-                    None
-                )
-
-                if chosen_slot is None:
-
-                    print(
-                        "[TRAY] ERROR: "
-                        "No free dishwasher slot found."
-                    )
-
-                    return
-
-                coords = (
-                    tray_camera
-                    .get_robot_coords_for_slot(
-                        chosen_slot
-                    )
-                )
-
-                print(
-                    f"[TRAY] Selected slot: "
-                    f"{chosen_slot}"
-                )
-
-                print(
-                    f"[TRAY] Slot coordinates: "
-                    f"{coords}"
-                )
-
-                client.SetFreeSlot(
-                    coords
-                )
-
-                print(
-                    f"[TRAY] FreeSlot stored: "
-                    f"{client.FreeSlot}"
-                )
-
-            except Exception as exc:
-
-                print(
-                    f"[TRAY] ERROR selecting "
-                    f"free slot: {exc}"
-                )
-
-                return
+            # ADD MUG SEQUENCE HERE
 
             client.MoveHome()
 
-            print(
-                "[ROBOT] Starting PickUpSequence..."
-            )
-
-            client.PickUpSequence(
-                obj_list[0],
-                orient,
-                normalized_vector
-            )
-
-            print(
-                "[ROBOT] PickUpSequence completed."
-            )
-
-            try:
-
-                time.sleep(0.5)
-
-                placed_ok = (
-                    tray_camera
-                    .verify_placement(
-                        chosen_slot
-                    )
-                )
-
-                if placed_ok:
-
-                    print(
-                        f"[TRAY] Placement verified "
-                        f"in slot '{chosen_slot}'."
-                    )
-
-                else:
-
-                    print(
-                        f"[TRAY] WARNING: placement "
-                        f"verification FAILED for "
-                        f"slot '{chosen_slot}'."
-                    )
-
-            except Exception as exc:
-
-                print(
-                    f"[TRAY] ERROR during "
-                    f"placement verification: {exc}"
-                )
-
+            client.Presentation(obj_list[0], orient, normalized_vector)
+            # client.Move(obj_list[0], orient, normalized_vector)
+            
+            client.MoveHome()
+            
             end_time = time.time()
-
-            process_time = (
-                end_time - start_time
-            )
-
+            process_time = end_time - start_time
             if save_protocol:
-
                 count += 1
+                tp.cup_information(file_path, count, obj_list[0], process_time , confidence = conf, label= label)
 
-                tp.cup_information(
-                    file_path,
-                    count,
-                    obj_list[0],
-                    process_time,
-                    confidence=conf,
-                    label=label
-                )
-
-                times_sec.append(
-                    process_time
-                )
-
-        except Exception as exc:
-
-            print(
-                f"[ROBOT] ERROR in local_move: "
-                f"{exc}"
-            )
-
-        finally:
-
-            # Remove processed object
-            if len(obj_list) > 0:
-
-                obj_list.pop(0)
-
+                times_sec.append(process_time)
+            obj_list.pop(0)
             busy = False
 
 def run():
@@ -261,31 +119,25 @@ def run():
     
     
     
-    if client.connectV2():
-
-        try:
-            tray_camera.load_calibrated_positions("slot_positions.json")
-            print("[TRAY] Loaded slot_positions.json")
-        except FileNotFoundError as exc:
-            print(f"[TRAY] WARNING: {exc}. Slot lookup will fail until the file exists.")
+    if client.connectV2(): 
 
         homogeneous, syncNN, pipeline, labels, rotation_matrix, translation_vector, camera_points, robot_points = cs.camera_setup(cam_coords, robot_file)
         
         # get avg of matrices
-        #input_file = "AveragedOutput.txt"
         # input_file = "RT.txt"
+        # # input_file = "RT.txt"
         # R_list, t_list = parse_file(input_file)
 
         # R_avg = average_rotations(R_list)
         # t_avg = average_translations(t_list)
 
-        #homogeneous = build_homogeneous(R_avg, t_avg)
-        #rotation_matrix = R_avg
-        #translation_vector = t_avg
+        # homogeneous = build_homogeneous(R_avg, t_avg)
+        # rotation_matrix = R_avg
+        # translation_vector = t_avg
         #==================================== TEST PROTOCOL SETUP ====================================
 
 
-        save_protocol = input("Do you want to save the test protocol? (y/n): ").lower() == 'y'
+        save_protocol = False;#input("Do you want to save the test protocol? (y/n): ").lower() == 'y'
         if save_protocol:
             file_path = tp.create_today_textfile()
             tp.ask_user(file_path, "start")
@@ -295,8 +147,7 @@ def run():
 
 
 
-        #====================================  MAIN  ====================================
-
+        #==================================== MAIN  ====================================
 
         first_run = True
         with dai.Device(pipeline) as device:
@@ -388,13 +239,13 @@ def run():
                                             norm[0] = 0
 
                                         print(f"[DEBUG] normal vector after matrix: {norm}")
-                                        #print("coordinates", obj_list)
-                                        #obj_list.pop(0) 
                                         threading.Thread(target=local_move, args=(quaternion, client, obj_list, [float(norm[0]),float(norm[1]),float(norm[2])], save_protocol, file_path, conf, label), daemon=True).start()
                                     except Exception as e:
                                         print(f"Error {e}")
-
+                        
                     # Show the frames in windows
+                if cv.waitKey(1) & 0xFF == ord(' '):
+                    client.space = True
                 cv.imshow("RGB", frame)
                 if cv.waitKey(1) & 0xFF == ord('r'):
                     client.connect()

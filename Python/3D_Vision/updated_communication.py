@@ -6,7 +6,6 @@ import cv2 as cv
 # from pynput import mouse
 lock = threading.Lock()
 
-
 class Communication():
     """Class to handle communication with RAPID server"""
     max_sleep_duration = 10
@@ -27,7 +26,8 @@ class Communication():
     
         ## What python can recive SEE BELOW
         self.ACKS = ["Ack_succesful","Ack_wait","Ack_Release done","Connection_Confirmed",
-                "Ack_succesfull", "ACK","Ack_Coordinate","Ack_Orientation", "Ack_normal", "Ack_EGM"] # these should be removed except ACK, it is not in the main switch case but inside a case
+                "Ack_succesfull", "ACK","Ack_Coordinate","Ack_Orientation", "Ack_normal", "Ack_EGM",
+                "Ack_LeavePosition"]
         
         self.CLOSE = ["Disconnect", ]
         self.ROBOTWANTSTOSENDCOORDINATES = ["Robot_Wants_To_Send_Coordinates", ] # Python will answer with an ACK then receive coordinates then answer with an ACK again
@@ -39,6 +39,7 @@ class Communication():
 
         self.ASKCALPOINT = ["AskCalPoint", ]
         self.ASKMUGNORMAL = ["Ask_MugNormal", ]
+        self.ASKFREESLOT = ["Ask_LeavePosition", "Ask_FreeSlot"]
 
         self.NEXTSTEP = ["Next_step",]
         self.ERROR = ["[ERROR]_wrong_format,try_again(exampel[x,y,z])","[ERROR]_wrong_format,send_normal","[ERROR]_wrong_format,try_again(exampel[q1,q2,q3,q4])",]
@@ -67,16 +68,10 @@ class Communication():
         self.Robotcoordinates = [100,100,100] # Robot hand coordinates
         self.Robotorientation = [1,0,0,0] # Robot hand orientation, unused?
         self.MugNormal = [0,0,1]
+        self.FreeSlot = None  # [x, y, z] in robot frame; set by main.py before each placement
 
         # self._connection_test_thread = threading.Thread(target=self._keep_connection_alive, daemon=True)
         # self._connection_test_thread.start()
-
-
-
-
-
-
-
 
 
     def _handle_response(self):
@@ -125,6 +120,15 @@ class Communication():
                 case askmug_normal if askmug_normal in self.ASKMUGNORMAL: # RAPID wants mug normal
                     with self._mutex_variable:  # Lock mutex for thread-safe access
                         self._send_message(str(self.MugNormal)) # Send mug normal
+
+                case ask_free_slot if ask_free_slot in self.ASKFREESLOT: # RAPID wants a free tray slot position
+                    with self._mutex_variable:
+                        if self.FreeSlot is None:
+                            # Invalid for rob_coordinates so RAPID retries instead of going to [0,0,0]
+                            self._send_message("NO_SLOT")
+                        else:
+                            self._send_message(str(list(self.FreeSlot)))
+
                 case error if error in self.ERROR:
                     print("Known error occured")
 
@@ -135,9 +139,6 @@ class Communication():
                     # exit(1)
                     # sys.exit(0)
                     return None
-            
-
-        
 
     def _keep_connection_alive(self):
         """Sleep 60s then send a test message to RAPID. Windows does not like open sockets without activity."""
@@ -315,13 +316,12 @@ class Communication():
 
     def PickUpSequence(self, coordinates, orientation,normalized_vector):
         with self._mutex_function:
+            with self._mutex_variable:
+                self.MugCoordinates = list(coordinates)
+                self.MugOrientation = list(orientation)
+                self.MugNormal = list(normalized_vector)
             self._send_message("Pick_Up_Sequence")
-            self.MugCoordinates = coordinates
-            self.MugOrientation = orientation
-            self.MugNormal = list(normalized_vector)
             self._handle_response()
-
-            #"""Perform pick-up sequence"""
             return None
 
     def LeaveSequence(self, coordinates, orientation):
@@ -333,6 +333,16 @@ class Communication():
 
             #"""Perform leave sequence"""
             return None
+
+    def SetFreeSlot(self, slot_coords):
+        """Store robot-frame [x, y, z] so RAPID can fetch it via Ask_LeavePosition."""
+        with self._mutex_variable:
+            self.FreeSlot = [float(v) for v in slot_coords]
+            print(f"[TRAY] Free slot set to: {self.FreeSlot}")
+
+    def LeaveSequenceTray(self, slot_coords=None):
+        if slot_coords is not None:
+            self.SetFreeSlot(slot_coords)
     
     def OpenGripper(self):
         with self._mutex_function:
@@ -365,7 +375,7 @@ class Communication():
             self._send_message("Connection_test")
             self._handle_response()
             return None
-        
+
     def EGM_movement(self):
         with self._mutex_function:
             self._send_message("EGM_movement")
