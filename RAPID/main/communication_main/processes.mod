@@ -270,15 +270,25 @@ MODULE processes
         shared_movement_right.flag := flag_nothing;
     ENDPROC
     
+! This procedure manages the transition from Handover to Placing
     PROC leaveSequence()
-        ! Setup Right arm for dishwasher placement
-        shared_movement_right.flag := flag_move_home_target;
-        shared_movement_right.wait_flag := TRUE;
-        WaitUntil shared_movement_right.wait_flag = FALSE;
+        VAR pos next_free_slot;
         
+        ! 1. Request the free coordinate from the Python 2D script
+        TPWrite "Requesting empty dishwasher slot from Python...";
+        next_free_slot := GetLeavePosition(); ! This function sends "Ask_LeavePosition"
+        
+        ! 2. Update the shared variable so the Right Arm knows the target
+        shared_movement_right.mug.position := next_free_slot;
+        
+        ! 3. Trigger the Right Arm to execute LeaveMugUprightV2
         shared_movement_right.flag := flag_leave_mug;
         shared_movement_right.wait_flag := TRUE;
+        
+        ! 4. Wait for the Right Arm to finish placing and retreat
         WaitUntil shared_movement_right.wait_flag = FALSE;
+        
+        TPWrite "Mug placed in free slot successfully.";
     ENDPROC
 !    ***********************************************************
 !     Function: GetRobTarget_two
@@ -553,5 +563,37 @@ MODULE processes
             ! In production, you might want to call server_init here to wait for a reconnect.
         ENDIF
     ENDFUNC
+    
+    
+    
+    
+    
+    
+    
+    FUNC pos GetLeavePosition()
+    VAR bool sucess;
+    VAR pos target_pos;
+    VAR string response;
+
+    ! 1. Ask Python: "Which slot is empty?"
+    SocketSend client_socket \Str:="Ask_LeavePosition";
+    SocketReceive client_socket \Str:=response;
+    
+    ! 2. Parse the answer "[x,y,z]"
+    sucess := rob_coordinates(response, target_pos);
+    
+    ! 3. If Python sent a bad format, keep asking instead of crashing
+    WHILE NOT sucess DO
+        SocketSend client_socket \Str:="[ERROR] Invalid format, retry";
+        SocketReceive client_socket \Str:=response;
+        sucess := rob_coordinates(response, target_pos);
+    ENDWHILE
+    
+    ! 4. Send ACK so Python knows we are moving
+    SocketSend client_socket \Str:="Ack_LeavePosition";
+    
+    RETURN target_pos;
+ENDFUNC
+
     
 ENDMODULE
