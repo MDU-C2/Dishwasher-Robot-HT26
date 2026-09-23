@@ -16,8 +16,8 @@ MODULE LeftArmMain
     CONST pos sholder_pos_far := [1000,800,460];
     CONST robtarget cup_target := [[499.548,-110.253,-46.3938],[0.0565402,0.114235,0.990146,-0.0580089],[-2,-3,-1,4],[-177.807,9E+09,9E+09,9E+09,9E+09,9E+09]]; 
         
-    CONST speeddata movement_speed := v1500;  !1000
-    CONST speeddata pick_speed := v400; !400
+    CONST speeddata movement_speed := v1000;  !1000
+    CONST speeddata pick_speed := v200; !400
     CONST speeddata transit_speed := v1500; ! Optimization: for fast resets
     CONST num max_magnitude := 300;         
     
@@ -92,7 +92,7 @@ MODULE LeftArmMain
                 
             CASE flag_leave_mug: 
                  ! Optimization: Uses standard normal for safer release
-                 LeaveMug shared_movement_left.mug.position,[0,0,-1],pick_offset;
+                 LeaveMug shared_movement_left.mug.position,[0,0,1],pick_offset;
             
             CASE flag_hand_over: 
                 ! Logic inside handOverSequence handles synchronization
