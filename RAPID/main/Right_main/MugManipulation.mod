@@ -182,4 +182,37 @@ MODULE MugManipulation
         MoveL Offs(target, 0, 0, offset_height), movement_speed, z50, tGripper;
     ENDPROC
     
+    ! New dynamic version for placing the mug upright in a free slot
+    PROC LeaveMugUprightV2(pos mug_end_position, num offset_height)
+        VAR robtarget target;
+        VAR orient hand_rotation;
+        ! [0,0,-1] assumes you want the gripper pointing down (mug opening UP)
+        VAR pos upward_normal := [0,0,-1];
+        
+        ! 1. Calculate orientation for this specific slot
+        hand_rotation := NormalToOrientationSemiOptimal(mug_end_position, upward_normal);
+        
+        target := CRobT(\Tool := tGripper);
+        ConfJ \Off;
+        ConfL \Off;
+
+        ! 2. Move to hover position above the free slot
+        target.rot := hand_rotation;
+        target.trans := mug_end_position + [0, 0, offset_height];
+        
+        ! Use MovementProc to handle the transition safely (prevents kinematics errors)
+        MovementProc target, step_size, max_magnitude, v1500; 
+        
+        ! 3. Lower precisely into the slot
+        target.trans := mug_end_position;
+        MoveL target, v500, fine, tGripper;
+        
+        ! 4. Release
+        g_GripOut;
+        WaitTime 0.2;
+        
+        ! 5. Fast retreat vertically
+        MoveL Offs(target, 0, 0, offset_height), v1500, z50, tGripper;
+    ENDPROC
+    
 ENDMODULE
