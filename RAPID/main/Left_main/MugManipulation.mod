@@ -77,7 +77,7 @@ MODULE MugManipulation
             WaitUntil shared_movement_left.wait_flag = TRUE; 
             
             g_GripOut;
-            WaitTime 0.1;
+          !  WaitTime 0.1;
             
             target.trans := target.trans - offset_dir*150;
             MoveL target, movement_speed, z50, tGripper;
