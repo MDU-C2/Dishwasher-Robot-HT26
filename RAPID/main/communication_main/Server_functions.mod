@@ -2,7 +2,7 @@ MODULE Server_functions
     VAR errnum ERR_NOT_VALID_STRING := 42;
     
     FUNC pos GetHandOverPos()
-        RETURN [350,0,150];
+        RETURN [350,0,250];
     ENDFUNC
     
 !    ***********************************************************
