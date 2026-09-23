@@ -257,10 +257,25 @@ def run():
     cam_coords = 'saved_coordinates.txt' # Path to camera coordinates .txt file
     robot_file = 'robo_coords.txt' # Path to robot coordinates .txt file
     client = Communication()
-    
-    
-    
-    
+
+    def find_empty_slot_in_dishwasher():
+        """Dynamic callback triggered when RAPID sends 'Ask_LeavePosition'."""
+        try:
+            free_slots = tray_camera.get_free_slots()
+            print(f"[DYNAMIC TRAY] Free slots: {free_slots}")
+            chosen_slot = next((name for name, state in free_slots.items() if state == "free"), None)
+            if chosen_slot:
+                coords = tray_camera.get_robot_coords_for_slot(chosen_slot)
+                print(f"[DYNAMIC TRAY] Selected slot: '{chosen_slot}' @ {coords}")
+                return coords
+            print("[DYNAMIC TRAY] WARNING: No free slot found in dishwasher.")
+            return None
+        except Exception as exc:
+            print(f"[DYNAMIC TRAY ERROR] {exc}")
+            return None
+
+    client.get_free_slot_logic = find_empty_slot_in_dishwasher
+
     if client.connectV2():
 
         try:

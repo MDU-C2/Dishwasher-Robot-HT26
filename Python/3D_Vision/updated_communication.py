@@ -123,11 +123,21 @@ class Communication():
 
                 case ask_free_slot if ask_free_slot in self.ASKFREESLOT: # RAPID wants a free tray slot position
                     with self._mutex_variable:
-                        if self.FreeSlot is None:
+                        if hasattr(self, 'get_free_slot_logic') and callable(self.get_free_slot_logic):
+                            try:
+                                slot_coords = self.get_free_slot_logic()
+                                if slot_coords is not None:
+                                    self._send_message(str(list(slot_coords)))
+                                else:
+                                    self._send_message("NO_SLOT")
+                            except Exception as exc:
+                                print(f" error: {exc}")
+                                self._send_message("NO_SLOT")
+                        elif self.FreeSlot is not None:
+                            self._send_message(str(list(self.FreeSlot)))
+                        else:
                             # Invalid for rob_coordinates so RAPID retries instead of going to [0,0,0]
                             self._send_message("NO_SLOT")
-                        else:
-                            self._send_message(str(list(self.FreeSlot)))
 
                 case error if error in self.ERROR:
                     print("Known error occured")
