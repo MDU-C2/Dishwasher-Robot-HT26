@@ -1,132 +1,165 @@
-import os, json, time
+import os
+import json
+import time
 import cv2 as cv
 import numpy as np
 
+# ===========================================================
+# CONFIGURATION
+# ===========================================================
 USE_CAM = True
-CAM_IDX = 1  # 1 is standard for USB-C connected phone cameras / DroidCam / Iriun on Windows
+CAM_IDX = 0  # Change to 1 if 0 is your laptop webcam and 1 is the USB tray cam
 
+# Global variables to maintain state
 POS: dict[str, list[float]] = {}
-# measure robot coordinates 
-def set_slot_positions(positions: dict[str, list[float]]): 
-    global POS
-    POS.clear()
-    POS.update(positions)
+_cap = None
+_ref_img = None
 
 def file_path(p: str) -> str:
+    """Helper to find files relative to the script location."""
     if os.path.exists(p):
         return p
     d = os.path.dirname(os.path.abspath(__file__))
-    a1 = os.path.join(d, p)
-    if os.path.exists(a1):
-        return a1
-    a2 = os.path.join(d, "..", "..", p)
-    if os.path.exists(a2):
-        return a2
-    return p
+    path = os.path.join(d, p)
+    return path
 
 def load_calibrated_positions(path: str = "slot_positions.json") -> None:
+    """Loads the Robot X,Y,Z coordinates for each slot name."""
+    global POS
     p = file_path(path)
     if not os.path.exists(p):
-        raise FileNotFoundError(f"No calibration file: {p}")
+        print(f"[TRAY ERROR] Calibration file not found: {p}")
+        return
     with open(p, "r") as f:
-        data = json.load(f)
-    set_slot_positions(data)
+        POS = json.load(f)
+    print(f"[TRAY] Loaded {len(POS)} slot coordinates.")
 
-def get_frame(warmup_frames: int = 5) -> np.ndarray:
-    if USE_CAM:
-        # Build search list: try user CAM_IDX first, then scan all standard USB camera indices
-        search_list = []
-        if isinstance(CAM_IDX, int):
-            search_list = [CAM_IDX] + [i for i in [0, 1, 2, 3] if i != CAM_IDX]
-        else:
-            search_list = [CAM_IDX, 0, 1, 2, 3]
-
-        for target in search_list:
-            try:
-                cap = cv.VideoCapture(target)
-                if cap.isOpened():
-                    time.sleep(0.3)
-                    for _ in range(warmup_frames):
-                        cap.grab()
-                    ret, f = cap.read()
-                    cap.release()
-                    if ret and f is not None and f.size > 0:
-                        return f
-                cap.release()
-            except Exception:
-                pass
-
-        raise RuntimeError(
-            f"[CAMERA ERROR] Could not detect any active USB camera.\n"
-            f"  - Please check USB cable connection or ensure webcam / DroidCam app is active."
-        )
-    p = file_path("test_images/current_state.jpg")
-    f = cv.imread(p)
-    if f is None:
-        raise FileNotFoundError(f"Missing {p}")
-    return f
-
-def load_cfg(p: str = "slot_config.json") -> dict[str, list[int]]:
+def load_cfg(p: str = "slot_config.json") -> dict:
+    """Loads the pixel bounding boxes [x1, y1, x2, y2] for the 2D camera."""
     path = file_path(p)
     if not os.path.exists(path):
-        raise FileNotFoundError(f"Missing {path}")
+        print(f"[TRAY ERROR] Config file not found: {path}")
+        return {}
     with open(path, "r") as f:
-        c = json.load(f)
-    if not c:
-        raise ValueError("Empty config")
-    return c
+        return json.load(f)
 
-def get_free_slots(thresh: float = 20, cfg_path: str = "slot_config.json", ref_path: str = "test_images/empty_tray.jpg") -> dict[str, str]:
-    fp = file_path(ref_path)
-    ref = cv.imread(fp)
-    if ref is None:
-        raise FileNotFoundError(f"Missing {fp}")
+def get_live_frame():
+    """Maintains a persistent camera connection for smooth video."""
+    global _cap
+    if not USE_CAM:
+        # Fallback to a static image if camera is disabled
+        img = cv.imread(file_path("test_images/current_state.jpg"))
+        return img
 
-    cur = get_frame()
-    cfg = load_cfg(cfg_path)
-    res = {}
+    if _cap is None or not _cap.isOpened():
+        print(f"[TRAY] Opening 2D Camera at index {CAM_IDX}...")
+        _cap = cv.VideoCapture(CAM_IDX)
+        # Set resolution for better detection
+        _cap.set(cv.CAP_PROP_FRAME_WIDTH, 1280)
+        _cap.set(cv.CAP_PROP_FRAME_HEIGHT, 720)
+        time.sleep(1.0) # Warmup
 
-    for name, b in cfg.items():
-        x1, y1, x2, y2 = b
-        rc = ref[y1:y2, x1:x2]
-        cc = cur[y1:y2, x1:x2]
+    ret, frame = _cap.read()
+    if not ret:
+        print("[TRAY ERROR] Failed to grab frame from 2D camera.")
+        return None
+    return frame
 
-        if rc.shape != cc.shape:
-            res[name] = "unknown"
-            continue
+def get_free_slots(thresh: float = 50):
+    """
+    Analyzes the tray and returns slot status and an annotated image.
+    Used by main.py to update the UI window.
+    """
+    global _ref_img
+    
+    # 1. Load Reference Image (Only once)
+    if _ref_img is None:
+        rf_path = file_path("test_images/empty_tray.jpg")
+        _ref_img = cv.imread(rf_path)
+        if _ref_img is None:
+            print(f"[TRAY ERROR] Reference image missing: {rf_path}")
+            return {}, None
 
-        diff = cv.absdiff(rc, cc)
-        m = float(np.mean(diff))
+    # 2. Get Current Frame
+    current_frame = get_live_frame()
+    if current_frame is None:
+        return {}, None
 
-        print(f"[diff mean: {m:.2f} (threshold: {thresh})")
+    # 3. Load Slot Pixel Configuration
+    cfg = load_cfg("slot_config.json")
+    results = {}
+    
+    # Overlay frame - start with a copy of current frame
+    display_frame = current_frame.copy()
 
-        res[name] = "occupied" if m > thresh else "free"
-    return res
+    for name, box in cfg.items():
+        try:
+            x1, y1, x2, y2 = box
+            
+            # Extract Region of Interest (ROI)
+            roi_ref = _ref_img[y1:y2, x1:x2]
+            roi_cur = current_frame[y1:y2, x1:x2]
+
+            if roi_ref.shape != roi_cur.shape:
+                results[name] = "unknown"
+                continue
+
+            # Compare current pixels to empty tray pixels
+            diff = cv.absdiff(roi_ref, roi_cur)
+            mean_diff = float(np.mean(diff))
+
+            # Determine Status
+            is_free = mean_diff < thresh
+            status = "free" if is_free else "occupied"
+            results[name] = status
+
+            # --- VISUAL FEEDBACK ---
+            # Green for Free, Red for Occupied
+            color = (0, 255, 0) if is_free else (0, 0, 255)
+            cv.rectangle(display_frame, (x1, y1), (x2, y2), color, 2)
+            
+            # Label
+            label_text = f"{name}: {status}"
+            cv.putText(display_frame, label_text, (x1, y1 - 10), 
+                       cv.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+        except Exception as e:
+            print(f"[TRAY ERROR] Processing {name}: {e}")
+
+    return results, display_frame
 
 def get_robot_coords_for_slot(name: str) -> list[float]:
+    """Returns [X, Y, Z] from slot_positions.json for the specified slot name."""
     if name not in POS:
-        raise KeyError(f"Unkown slot '{name}'. Ensure slot_positions.json is loaded.")
+        raise KeyError(f"Slot '{name}' not found in calibrated positions.")
     return list(POS[name])
 
-def verify_placement(name: str, thresh: float = 20, cfg_path: str = "slot_config.json", ref_path: str = "test_images/empty_tray.jpg") -> bool:
-    res = get_free_slots(thresh, cfg_path, ref_path)
+def verify_placement(name: str, thresh: float = 20) -> bool:
+    """Returns True if the specified slot is now 'occupied'."""
+    res, _ = get_free_slots(thresh)
     return res.get(name) == "occupied"
 
+def release_camera():
+    """Closes the 2D camera resource."""
+    global _cap
+    if _cap is not None:
+        _cap.release()
+        _cap = None
+        print("[TRAY] 2D Camera released.")
+
+# ===========================================================
+# TEST SCRIPT
+# ===========================================================
 if __name__ == "__main__":
+    # Test block to run this file standalone
     try:
-        load_calibrated_positions("slot_positions.json")
-        print("[INFO] Loaded slot_positions.json.")
-    except FileNotFoundError:
-        print("[INFO] Running without slot_positions.json loaded "
-              "(get_robot_coords_for_slot will fail until it exists).")
-
-    status = get_free_slots()
-    print("Slots:", status)
-
-    if "slot_1" in status:
-        print("Verify slot_1:", verify_placement("slot_1"))
-        if POS:
-            try:
-                print("Coords slot_1:", get_robot_coords_for_slot("slot_1"))
-            except KeyError as e:
-                print(e)
+        load_calibrated_positions()
+        while True:
+            slots, img = get_free_slots(thresh=25)
+            if img is not None:
+                cv.imshow("Tray Test (Press Q to quit)", img)
+            
+            if cv.waitKey(1) & 0xFF == ord('q'):
+                break
+    finally:
+        release_camera()
+        cv.destroyAllWindows()

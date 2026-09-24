@@ -91,7 +91,7 @@ def local_move( orient, client, obj_list, normalized_vector, save_protocol, file
 
             try:
 
-                free_slots = tray_camera.get_free_slots()
+                free_slots, _ = tray_camera.get_free_slots()
 
                 print(
                     f"[TRAY] Free slots: {free_slots}"
@@ -261,7 +261,7 @@ def run():
     def find_empty_slot_in_dishwasher():
         """Dynamic callback triggered when RAPID sends 'Ask_LeavePosition'."""
         try:
-            free_slots = tray_camera.get_free_slots()
+            free_slots, _ = tray_camera.get_free_slots()
             print(f"[DYNAMIC TRAY] Free slots: {free_slots}")
             chosen_slot = next((name for name, state in free_slots.items() if state == "free"), None)
             if chosen_slot:
@@ -324,9 +324,12 @@ def run():
             obj_list = []
             
             while True:
-                in_rgb   = q_rgb.get() # latest RGB frame
-                in_depth = q_depth.get() # latest depth frame (aligned to RGB)
-                in_dets  = q_det.get() # latest detection results
+                slots, tray_img = tray_camera.get_free_slots()
+                if tray_img is not None:
+                    cv.imshow("Tray Status (2D)", tray_img)
+                    in_rgb   = q_rgb.get() # latest RGB frame
+                    in_depth = q_depth.get() # latest depth frame (aligned to RGB)
+                    in_dets  = q_det.get() # latest detection results
 
 
                 frame = in_rgb.getCvFrame() # OpenCV BGR frame from color camera
