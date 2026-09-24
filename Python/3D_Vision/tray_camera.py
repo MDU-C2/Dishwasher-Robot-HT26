@@ -3,7 +3,7 @@ import cv2 as cv
 import numpy as np
 
 USE_CAM = True
-CAM_IDX = 1
+CAM_IDX = 1  # 1 is standard for USB-C connected phone cameras / DroidCam / Iriun on Windows
 
 POS: dict[str, list[float]] = {}
 # measure robot coordinates 
@@ -32,21 +32,34 @@ def load_calibrated_positions(path: str = "slot_positions.json") -> None:
         data = json.load(f)
     set_slot_positions(data)
 
-def get_frame(warmup_frames: int = 10) -> np.ndarray:
+def get_frame(warmup_frames: int = 5) -> np.ndarray:
     if USE_CAM:
-        for idx in [CAM_IDX]:
-            cap = cv.VideoCapture(idx) #catch one image
-            if cap.isOpened():
-                time.sleep(0.5) #delay för fokus
+        # Build search list: try user CAM_IDX first, then scan all standard USB camera indices
+        search_list = []
+        if isinstance(CAM_IDX, int):
+            search_list = [CAM_IDX] + [i for i in [0, 1, 2, 3] if i != CAM_IDX]
+        else:
+            search_list = [CAM_IDX, 0, 1, 2, 3]
 
-                for _ in range(warmup_frames):
-                    cap.grab()
-                ret, f = cap.read()
+        for target in search_list:
+            try:
+                cap = cv.VideoCapture(target)
+                if cap.isOpened():
+                    time.sleep(0.3)
+                    for _ in range(warmup_frames):
+                        cap.grab()
+                    ret, f = cap.read()
+                    cap.release()
+                    if ret and f is not None and f.size > 0:
+                        return f
                 cap.release()
-                if ret and f is not None:
-                    return f
-            cap.release()
-        raise RuntimeError("Could not take picture")
+            except Exception:
+                pass
+
+        raise RuntimeError(
+            f"[CAMERA ERROR] Could not detect any active USB camera.\n"
+            f"  - Please check USB cable connection or ensure webcam / DroidCam app is active."
+        )
     p = file_path("test_images/current_state.jpg")
     f = cv.imread(p)
     if f is None:
