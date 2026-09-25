@@ -73,8 +73,8 @@ MODULE LeftArmMain
                 
             CASE flag_move_EGM: 
                 ! Optimization: Smooth approach to EGM point
-                MoveJ EGM_starting_point,movement_speed,fine,tGripper;
-                EGMfollowCup;
+              !  MoveJ EGM_starting_point,movement_speed,fine,tGripper;
+                !EGMfollowCup;
                 
             CASE flag_move_calibration:
                 ! Optimization: Blended movement through home target
