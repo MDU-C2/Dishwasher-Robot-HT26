@@ -1,50 +1,37 @@
 MODULE MugManipulation
 
-PROC FetchMug(pos mug_position, num offset_lenght, pos mug_normal)
-        VAR robtarget target;
-        VAR robtarget hover_target; ! NEW variable
-        VAR orient hand_rotation;
-        VAR pos offset_dir;
-
-        hand_rotation := NormalToOrientationSemiOptimal(mug_position, mug_normal);
-        offset_dir := RotatePointUsingQuaternion([0,0,1], hand_rotation);
-        
-        target := CRobT(\Tool := tGripper);
-        ConfJ \Off;
-
-        ! Apply your standard offsets
-        mug_position := mug_position + [0,0,1]*zOffset(mug_normal) + ([1,0,0]*x_offset + [0,1,0]*y_offset + [0,0,1]*z_offset);
-        
-        target.rot := hand_rotation;
-        target.trans := mug_position;
-
-        ! ===========================================================
-        ! NEW PATH PLANNING: VERTICAL ENTRY
-        ! ===========================================================
-        ! 1. Create a point 150mm directly ABOVE the mug
-        hover_target := target;
-        hover_target.trans.z := hover_target.trans.z + 150; 
-
-        ! 2. Move to the hover point first (Safe transit)
-        ! This ensures we don't hit other mugs on the table while traveling
-        MovementProc hover_target, step_size, max_magnitude, v1000;
-        
-        ! 3. Open gripper while hovering
-        g_GripOut;
-        WaitTime 0.1;
-                
-        ! 4. Drop straight down (Vertical approach)
-        MoveL target, movement_speed, fine, tGripper;
-        ! ===========================================================
-
-        ! 5. Grip
-        g_GripIn \HoldForce:=20;
-        WaitTime 0.6; 
-        
-        ! 6. Lift straight back up to the hover point before leaving
-        ! This ensures we don't hit neighboring mugs while pulling away
-        MoveL hover_target, movement_speed, z50, tGripper;
-        
+    ! fetch up mug
+    PROC FetchMug(pos mug_position, num offset_lenght, pos mug_normal)
+    VAR robtarget target;
+    VAR orient hand_rotation;
+    VAR pos offset_dir;
+    
+    ! If this is the Left Arm, move to the side corridor first
+    IF (RobName() = "ROB_L") THEN
+    ! Move quickly to the high-left safe point
+    ! Using z100 allows the robot to curve smoothly toward the mug
+    MoveJ pSafeEntryLeft, v1000, fine, tGripper;
+    ENDIF
+    
+    hand_rotation := NormalToOrientationSemiOptimal(mug_position,mug_normal);
+    offset_dir := RotatePointUsingQuaternion([0,0,1],hand_rotation);
+    offset_dir.x := Round(offset_dir.x \Dec:=4);
+    offset_dir.y := Round(offset_dir.y \Dec:=4);
+    offset_dir.z := Round(offset_dir.z \Dec:=4);
+    target := CRobT(\Tool := tGripper);
+    ConfJ \Off;
+    mug_position := mug_position + [0,0,1]*zOffset(mug_normal) + ([1,0,0]*x_offset + [0,1,0]*y_offset +[0,0,1]*z_offset);
+    target.rot := hand_rotation;
+    target.trans := mug_position - offset_dir*offset_lenght;
+    MovementProc target,step_size,max_magnitude,movement_speed;
+    g_GripOut;
+    WaitTime(0.2);
+    target.trans := mug_position + offset_dir*gripper_offset;
+    moveL target,movement_speed,fine,tGripper;
+    g_GripIn \HoldForce:=20;
+    ! WaitTime(0.3);
+    target.trans := mug_position - offset_dir*offset_lenght + [0,0,1]*offset_z_when_fetching;
+    moveL target,vmax,z100,tGripper;
     ENDPROC
     
   
@@ -66,7 +53,7 @@ PROC FetchMug(pos mug_position, num offset_lenght, pos mug_normal)
 
             target.trans := target_pos - 150*offset_dir;
             MovementProc target, step_size, max_magnitude, movement_speed;
-            
+             WaitTime 0.9;
             g_GripOut; 
             shared_movement_right.wait_flag := FALSE; 
             
@@ -89,7 +76,7 @@ PROC FetchMug(pos mug_position, num offset_lenght, pos mug_normal)
             WaitUntil shared_movement_left.wait_flag = TRUE; 
             
             g_GripOut;
-            !WaitTime 0.1;
+          !  WaitTime 0.1;
             
             target.trans := target.trans - offset_dir*150;
             MoveL target, movement_speed, z50, tGripper;

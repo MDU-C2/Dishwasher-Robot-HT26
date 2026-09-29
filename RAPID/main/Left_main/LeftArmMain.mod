@@ -10,6 +10,10 @@ MODULE LeftArmMain
     CONST robtarget home_target_v2:=[[247.91,314.47,202.37],[0.680648,0.280046,0.674068,0.0626469],[0,-2,0,5],[107.401,9E+09,9E+09,9E+09,9E+09,9E+09]];   
     CONST robtarget home_target_v3:=[[357.9,284.46,274.39],[0.195938,0.546826,-0.570092,0.581021],[0,0,0,4],[175.044,9E+09,9E+09,9E+09,9E+09,9E+09]]; 
     CONST robtarget EGM_starting_point := [[442.004,-92.0926,171.604],[0.0189937,-0.0236138,0.999427,-0.0150419],[-1,1,-1,4],[-152.666,9E+09,9E+09,9E+09,9E+09,9E+09]];
+    !CONST robtarget pSafeEntryLeft := [[418, 423, 95],[0.36, -0.41, 0.59, -0.59],[0,0,0,4],[-175,9E9,9E9,9E9,9E9,9E9]]; ! new waypoint
+   ! CONST robtarget pSafeEntryLeft := [[418, 323, 213],[0.66, 0.66, 0.25, 0.21],[0,0,0,4],[-175,9E9,9E9,9E9,9E9,9E9]]; ! new waypoint
+
+    CONST robtarget pSafeEntryLeft := [[208, 323, 195],[0.5, 0.5, 0.5, 0.5],[0,0,0,4],[-175,9E9,9E9,9E9,9E9,9E9]]; ! new waypoint works
     
     ! used for mug manipulation
     CONST pos sholder_pos_close := [110,200,460];
@@ -25,9 +29,15 @@ MODULE LeftArmMain
     CONST num step_size := 150;             
         
     ! used in basic movement
-    CONST num x_offset := 10;                
+  !  CONST num x_offset := 9;           
+  !  CONST num y_offset := -10;                
+   ! CONST num z_offset := -1;        
+    
+    CONST num x_offset := 7.5;           
     CONST num y_offset := -10;                
-    CONST num z_offset := 0;        
+    CONST num z_offset := -0.5; 
+    
+    
     
     ! used when fetching a mug
     CONST num gripper_offset := 0;    
@@ -73,8 +83,8 @@ MODULE LeftArmMain
                 
             CASE flag_move_EGM: 
                 ! Optimization: Smooth approach to EGM point
-              !  MoveJ EGM_starting_point,movement_speed,fine,tGripper;
-                !EGMfollowCup;
+                MoveJ EGM_starting_point,movement_speed,fine,tGripper;
+                EGMfollowCup;
                 
             CASE flag_move_calibration:
                 ! Optimization: Blended movement through home target

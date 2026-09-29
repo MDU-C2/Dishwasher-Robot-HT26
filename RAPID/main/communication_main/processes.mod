@@ -194,6 +194,13 @@ MODULE processes
     PROC pickupSequence()
         VAR mug_vector buffer;
         VAR mug_vector hand_over_pose;
+        
+                ! Ensure both arms are idle before we even ask Python for coordinates
+        shared_movement_left.wait_flag := FALSE;
+        shared_movement_right.wait_flag := FALSE;
+        shared_movement_left.flag := flag_nothing;
+        shared_movement_right.flag := flag_nothing;
+        
         buffer := GetRobVector();
         
         ! Ensure Z-safety
@@ -205,7 +212,7 @@ MODULE processes
         buffer.position.z := 35;
 
         ! DECISION LOGIC
-        IF buffer.position.y < -100 THEN
+        IF buffer.position.y < -10000 THEN
             ! CASE 1: Mug is on the far right. Only Right Arm works.
             shared_movement_right.mug := buffer;
             shared_movement_right.flag := flag_pick_up_mug;
@@ -223,6 +230,8 @@ MODULE processes
             ! It travels to the meeting point while Left is still picking.
             shared_movement_right.flag := flag_hand_over;
             shared_movement_right.wait_flag := TRUE;
+            
+            
 
             ! 2. START LEFT ARM PICK
             shared_movement_left.mug := buffer; 
@@ -240,9 +249,23 @@ MODULE processes
             HandOverSyncLogic;
             
             leaveSequence;
+            
+                    ! ===========================================================
+        ! NEW: MANDATORY STATE RESET
+        ! ===========================================================
+        ! 1. Clear flags so arms don't accidentally re-trigger
+        shared_movement_left.flag := flag_nothing;
+        shared_movement_right.flag := flag_nothing;
+
+        ! 2. Ensure both arms have acknowledged they are finished
+        ! This waits until both main loops have reached the 'wait_flag := FALSE' line
+        WaitUntil shared_movement_left.wait_flag = FALSE;
+        WaitUntil shared_movement_right.wait_flag = FALSE;
+
+        TPWrite "System Reset: Ready for next mug.";
         ENDIF
         
-      !  moveToHomeTarget;
+        moveToHomeTarget;
     ENDPROC
     
         PROC HandOverSyncLogic()
@@ -255,15 +278,14 @@ MODULE processes
         
         ! C. Wait for Right arm to finish physical gripping
       !  WaitUntil shared_movement_right.wait_flag = FALSE;
-        WaitTime 2.4; ! buffer for right to have gripped !1.15 for all except glass. 1.4 for small glass
+        WaitTime 1.6; ! buffer for right to have gripped 1.2
         
         ! D. Tell Left arm to RELEASE and move back
         shared_movement_left.wait_flag := TRUE;
         
         ! E. Wait for Left arm to signal it is clear
-      !  WaitUntil shared_movement_left.wait_flag = FALSE;
-        WaitTime 1;
-      ! WaitTime 2.2; ! 1.2 for paper mug
+     WaitUntil shared_movement_left.wait_flag = FALSE;
+      ! WaitTime 1;
         
         ! Reset flags
         shared_movement_left.flag := flag_nothing;
@@ -518,8 +540,7 @@ MODULE processes
         ! Initial dummy values
         target:=[[611.44,-10,224.449],[0,0,1]]; 
 
-        ! --- 1. COORDINATE RETRIEVAL ---
-        WaitTime(delay_time); ! Now 0.05s for speed
+        ! --- 1. COORDINATE RETRIEVAL ---        WaitTime(delay_time); ! Now 0.05s for speed
         SocketSend client_socket \Str:="Ask_Coordinate";
         SocketReceive client_socket \Str:=message;
         
@@ -564,12 +585,7 @@ MODULE processes
         ENDIF
     ENDFUNC
     
-    
-    
-    
-    
-    
-    
+        
     FUNC pos GetLeavePosition()
     VAR bool sucess;
     VAR pos target_pos;

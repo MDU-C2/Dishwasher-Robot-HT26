@@ -54,7 +54,7 @@ MODULE MugManipulation
 
             target.trans := target_pos - 150*offset_dir;
             MovementProc target, step_size, max_magnitude, movement_speed;
-            
+            WaitTime 3.5; 
             g_GripOut; 
             shared_movement_right.wait_flag := FALSE; 
             
@@ -153,7 +153,7 @@ MODULE MugManipulation
         ! Define the upward normal [X=0, Y=0, Z=1]
         VAR pos upward_normal := [0,0,-1];
         
-        mug_end_position := [692.0, -424.0, 175.06];
+        mug_end_position := [692.42, -424.85, 175.0];
         
         ! 1. Calculate orientation for the mug to be upright
         ! We use SemiOptimal to ensure the YuMi's elbow stays away from its body
@@ -182,7 +182,7 @@ MODULE MugManipulation
         MoveL Offs(target, 0, 0, offset_height), movement_speed, z50, tGripper;
     ENDPROC
     
-    ! New dynamic version for placing the mug upright in a free slot
+        ! New dynamic version for placing the mug upright in a free slot
     PROC LeaveMugUprightV2(pos mug_end_position, num offset_height)
         VAR robtarget target;
         VAR orient hand_rotation;
@@ -200,8 +200,11 @@ MODULE MugManipulation
         target.rot := hand_rotation;
         target.trans := mug_end_position + [0, 0, offset_height];
         
+                WaitTime 1;
+        
         ! Use MovementProc to handle the transition safely (prevents kinematics errors)
         MovementProc target, step_size, max_magnitude, v1500; 
+        
         
         ! 3. Lower precisely into the slot
         target.trans := mug_end_position;
@@ -214,5 +217,7 @@ MODULE MugManipulation
         ! 5. Fast retreat vertically
         MoveL Offs(target, 0, 0, offset_height), v1500, z50, tGripper;
     ENDPROC
+    
+    
     
 ENDMODULE
