@@ -1,37 +1,56 @@
 MODULE MugManipulation
 
     ! fetch up mug
-    PROC FetchMug(pos mug_position, num offset_lenght, pos mug_normal)
-    VAR robtarget target;
-    VAR orient hand_rotation;
-    VAR pos offset_dir;
-    
-    ! If this is the Left Arm, move to the side corridor first
-    IF (RobName() = "ROB_L") THEN
-    ! Move quickly to the high-left safe point
-    ! Using z100 allows the robot to curve smoothly toward the mug
-    MoveJ pSafeEntryLeft, v1000, fine, tGripper;
-    ENDIF
-    
-    hand_rotation := NormalToOrientationSemiOptimal(mug_position,mug_normal);
-    offset_dir := RotatePointUsingQuaternion([0,0,1],hand_rotation);
-    offset_dir.x := Round(offset_dir.x \Dec:=4);
-    offset_dir.y := Round(offset_dir.y \Dec:=4);
-    offset_dir.z := Round(offset_dir.z \Dec:=4);
-    target := CRobT(\Tool := tGripper);
-    ConfJ \Off;
-    mug_position := mug_position + [0,0,1]*zOffset(mug_normal) + ([1,0,0]*x_offset + [0,1,0]*y_offset +[0,0,1]*z_offset);
-    target.rot := hand_rotation;
-    target.trans := mug_position - offset_dir*offset_lenght;
-    MovementProc target,step_size,max_magnitude,movement_speed;
-    g_GripOut;
-    WaitTime(0.2);
-    target.trans := mug_position + offset_dir*gripper_offset;
-    moveL target,movement_speed,fine,tGripper;
-    g_GripIn \HoldForce:=20;
-    ! WaitTime(0.3);
-    target.trans := mug_position - offset_dir*offset_lenght + [0,0,1]*offset_z_when_fetching;
-    moveL target,vmax,z100,tGripper;
+
+PROC FetchMug(pos mug_position, num offset_lenght, pos mug_normal)
+        VAR robtarget target;
+        VAR robtarget side_lane;
+        VAR orient hand_rotation;
+        VAR pos offset_dir;
+
+        ! 1. PRE-PICK: Move to side corridor to go around mugs
+       ! IF (RobName() = "ROB_L") THEN
+       !     MoveJ pSafeEntryLeft, v1000, z100, tGripper;
+       ! ENDIF
+
+        ! 2. Math Setup
+        hand_rotation := NormalToOrientationSemiOptimal(mug_position, mug_normal);
+        offset_dir := RotatePointUsingQuaternion([0,0,1], hand_rotation);
+        
+        target := CRobT(\Tool := tGripper);
+        ConfJ \Off;
+
+        ! Apply calibration offsets
+        mug_position := mug_position + [0,0,1]*zOffset(mug_normal) + ([1,0,0]*x_offset + [0,1,0]*y_offset + [0,0,1]*z_offset);
+        
+        target.rot := hand_rotation;
+        target.trans := mug_position;
+
+        ! 3. HORIZONTAL SIDE APPROACH
+        side_lane := target;
+        
+        ! FIX: Use Vector Addition [+] instead of Offs() because mug_position is 'pos'
+        IF (RobName() = "ROB_L") THEN
+            ! Offset 150mm to the Left (+Y)
+            side_lane.trans := mug_position + [0, 20, 0]; 
+        ELSE
+            ! Offset 150mm to the Right (-Y)
+            side_lane.trans := mug_position + [0, -20, 0]; 
+        ENDIF
+
+        ! Move to side lane, then slide in
+       ! MovementProc side_lane, step_size, max_magnitude, v1000;
+        MovementProc side_lane, 10, max_magnitude, v1000;
+        g_GripOut;
+        
+        ! Move linearly from the side to the mug center
+        MoveL target, movement_speed, fine, tGripper;
+        
+        g_GripIn \HoldForce:=20;
+        WaitTime 0.5; 
+        
+        ! Retreat back to the side lane corridor
+        MoveL side_lane, v800, z50, tGripper;
     ENDPROC
     
   
@@ -39,48 +58,57 @@ MODULE MugManipulation
         VAR robtarget target;
         VAR pos offset_dir;
         VAR pos target_pos;
-        CONST num handover_z_offset := -30; 
+        VAR num spin_count := 0;
+        CONST num handover_z_offset := -40; 
        
         target := CRobT(\Tool := tGripper);
-        target.rot := MugHandOverOrient();
-        offset_dir := RotatePointUsingQuaternion([0,0,1], target.rot);
-        
         ConfJ \Off;
-        
+
         IF (RobName() = "ROB_R") THEN
+            ! RECEIVER (RIGHT): ADAPTIVE - NO FLIP
+            WaitUntil shared_movement_left.wait_flag = FALSE; 
+            target.rot := shared_movement_left.target.rot; ! COPY Left Arm's rotation
+            
             target_pos := shared_movement_right.hand_over_pose.position;
             target_pos.z := target_pos.z + handover_z_offset;
+            offset_dir := RotatePointUsingQuaternion([0,0,1], target.rot);
 
             target.trans := target_pos - 150*offset_dir;
             MovementProc target, step_size, max_magnitude, movement_speed;
-             WaitTime 0.9;
+            
             g_GripOut; 
             shared_movement_right.wait_flag := FALSE; 
-            
             WaitUntil shared_movement_right.wait_flag = TRUE; 
             
             target.trans := target_pos;
             MoveL target, movement_speed, fine, tGripper;
-            
             g_GripIn \HoldForce:=20;
-            WaitTime 0.1; 
+            WaitTime 0.5; 
             shared_movement_right.wait_flag := FALSE; 
 
         ELSE
+            ! GIVER (LEFT): Keep pick orientation, spin only if unreachable
             target_pos := shared_movement_left.hand_over_pose.position;
             target.trans := target_pos;
+
+            WHILE NOT checkJointValues(target) DO
+                target.rot := target.rot * OrientZYX(45, 0, 0); ! Spin around mug
+                spin_count := spin_count + 1;
+                IF spin_count > 8 THEN target.trans.x := target.trans.x + 50; spin_count := 0; ENDIF
+            ENDWHILE
+            
+            shared_movement_left.target := target;
             MovementProc target, step_size, max_magnitude, movement_speed;
+            MoveL target, movement_speed, fine, tGripper;
             
             shared_movement_left.wait_flag := FALSE; 
-            
             WaitUntil shared_movement_left.wait_flag = TRUE; 
-            
             g_GripOut;
-          !  WaitTime 0.1;
+            WaitTime 0.2;
             
+            offset_dir := RotatePointUsingQuaternion([0,0,1], target.rot);
             target.trans := target.trans - offset_dir*150;
-            MoveL target, movement_speed, z50, tGripper;
-            
+            MoveL target, vMax, z50, tGripper;
             shared_movement_left.wait_flag := FALSE; 
         ENDIF
     ENDPROC

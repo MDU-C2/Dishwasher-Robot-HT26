@@ -13,7 +13,7 @@ MODULE LeftArmMain
     !CONST robtarget pSafeEntryLeft := [[418, 423, 95],[0.36, -0.41, 0.59, -0.59],[0,0,0,4],[-175,9E9,9E9,9E9,9E9,9E9]]; ! new waypoint
    ! CONST robtarget pSafeEntryLeft := [[418, 323, 213],[0.66, 0.66, 0.25, 0.21],[0,0,0,4],[-175,9E9,9E9,9E9,9E9,9E9]]; ! new waypoint
 
-    CONST robtarget pSafeEntryLeft := [[208, 323, 195],[0.5, 0.5, 0.5, 0.5],[0,0,0,4],[-175,9E9,9E9,9E9,9E9,9E9]]; ! new waypoint works
+   ! CONST robtarget pSafeEntryLeft := [[208, 323, 195],[0.5, 0.5, 0.5, 0.5],[0,0,0,4],[-175,9E9,9E9,9E9,9E9,9E9]]; ! new waypoint works
     
     ! used for mug manipulation
     CONST pos sholder_pos_close := [110,200,460];
