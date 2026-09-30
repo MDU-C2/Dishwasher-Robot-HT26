@@ -61,31 +61,38 @@ MODULE MugManipulation_SupportFunctions
    ENDFUNC
    
    !Align y axes with normal and align zaxes to a semi optimal vector from robot to mug
-      FUNC pos SemiOptimalPickUpOrientation(pos position, pos normal)
-       VAR pos u; VAR pos v; VAR num scaler := 0.2;
-       
-       ! FORCE SIDE APPROACH: Stay in the side lanes to avoid hitting other mugs
-       IF (RobName() = "ROB_L") THEN
-           u := [0, -1, 0]; ! Left arm points its fingers RIGHT toward the mug
-       ELSE
-           u := [0, 1, 0];  ! Right arm points its fingers LEFT toward the mug
-       ENDIF
+FUNC pos SemiOptimalPickUpOrientation(pos position, pos normal)
+        VAR pos u;
+        VAR pos v;
+        VAR num scaler := 0.2;
+        
+        ! position = mug coordinates in robot frame
+        ! 1. Check if the mug is in the "Danger Zone" (e.g., X > 350)
+        IF (RobName() = "ROB_L" AND position.x < 380 AND position.y < 200 ) THEN
+            ! AREA A: Fingers point RIGHT (sideways logic)
+            u := [0, -1, 0]; 
+        ELSE
+            ! AREA B: Natural Approach (point fingers from robot base to mug)
+            ! This is the "normal" movement you requested.
+            u := position / sqrt(DotProd(position, position));
+        ENDIF
 
-       IF Abs(normal.z) <= Abs(normal.y) AND Abs(normal.z) <= Abs(normal.x) THEN 
+        ! 2. Standard math to make v orthogonal to the normal
+        IF Abs(normal.z) <= Abs(normal.y) AND Abs(normal.z) <= Abs(normal.x) THEN 
              v := [0, 0, sign(u.z)*scaler];
-       ELSEIF Abs(normal.y) <= Abs(normal.x) AND Abs(normal.y) <= Abs(normal.z) THEN 
+        ELSEIF Abs(normal.y) <= Abs(normal.x) AND Abs(normal.y) <= Abs(normal.z) THEN 
              v := [0, sign(u.y)*scaler, 0];
-       ELSE 
+        ELSE 
             v := [sign(u.x)*scaler, 0, 0];
-       ENDIF
+        ENDIF
        
-       v := v + u;
-       v := v/sqrt(DotProd(v, v));
-       v := v - Project(v, normal);
-       v := v/sqrt(DotProd(v, v));
-       
-       RETURN v;
-   ENDFUNC
+        v := v + u;
+        v := v/sqrt(DotProd(v, v));
+        v := v - Project(v, normal);
+        v := v/sqrt(DotProd(v, v));
+        
+        RETURN v;
+    ENDFUNC
    
       FUNC num ZOffset(pos normal)
         ! If upright, no height change. If on side, nudge 20mm deeper.
