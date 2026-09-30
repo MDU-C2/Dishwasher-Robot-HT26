@@ -1,0 +1,323 @@
+{
+  "status": "diagnostic_only_unknown_marker_to_tool_offset",
+  "not_for_robot_motion": true,
+  "mapping_confirmation": "User confirmed sample 1 HOMEpos, samples 2..16 s1..s15; target values agree with controller readings",
+  "source": "camera frame, ArUco ID23 centre, depth backprojection",
+  "destination": "recorded robot tool position frame; actual tool/workobject definitions not confirmed",
+  "equation": "robot_position_approx_mm = R @ camera_marker_center_mm + t_mm",
+  "limitations": [
+    "Marker centre and robot tool origin are different physical points; orientation-dependent offset ignored",
+    "User reports 80 mm vertical marker-to-gripper-centre distance, not a measured 3D tool-frame offset",
+    "RGB/depth pixel geometry still pending verification",
+    "Leave-one-out errors use this same campaign, not independent physical validation"
+  ],
+  "T_diagnostic": [
+    [
+      -0.05272090557565482,
+      -0.4000929920231993,
+      0.9149568863335615,
+      -59.91683725892182
+    ],
+    [
+      -0.9980599751122554,
+      -0.009274843734204832,
+      -0.061565114737399375,
+      34.30217408063033
+    ],
+    [
+      0.03311785310381626,
+      -0.9164276158036859,
+      -0.3988278235005222,
+      332.2979266418337
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "fit_rmse_mm": 24.843384917298344,
+  "fit_max_mm": 70.46920988685547,
+  "leave_one_out_rmse_mm": 29.919547007246077,
+  "leave_one_out_max_mm": 88.3923077436492,
+  "camera_spread_singular_values_mm": [
+    444.97735546567026,
+    308.1589157288528,
+    179.41442590963277
+  ],
+  "samples": [
+    {
+      "sample": "sample_0001",
+      "robot_target": "HOMEpos",
+      "camera_xyz_mm": [
+        -111.19573248373142,
+        -21.760797016512647,
+        589.0
+      ],
+      "robot_xyz_mm": [
+        482.197102023,
+        144.011712884,
+        100.630619004
+      ],
+      "fit_error_mm": 38.84472779569324,
+      "leave_one_out_error_mm": 45.02494690193422,
+      "depth_range_mm": 12.0
+    },
+    {
+      "sample": "sample_0002",
+      "robot_target": "s1",
+      "camera_xyz_mm": [
+        -7.630413786206655,
+        5.48638321757907,
+        371.0
+      ],
+      "robot_xyz_mm": [
+        282.1975001,
+        35.092563013,
+        165.269291101
+      ],
+      "fit_error_mm": 21.63263295980175,
+      "leave_one_out_error_mm": 25.466795938198484,
+      "depth_range_mm": 46.0
+    },
+    {
+      "sample": "sample_0003",
+      "robot_target": "s2",
+      "camera_xyz_mm": [
+        -111.28277236921205,
+        67.29303776462284,
+        462.0
+      ],
+      "robot_xyz_mm": [
+        345.636867071,
+        117.661303015,
+        82.24910993
+      ],
+      "fit_error_mm": 4.15322694014226,
+      "leave_one_out_error_mm": 4.933924242162284,
+      "depth_range_mm": 0.0
+    },
+    {
+      "sample": "sample_0004",
+      "robot_target": "s3",
+      "camera_xyz_mm": [
+        107.44482935461444,
+        -40.338548449671606,
+        501.0
+      ],
+      "robot_xyz_mm": [
+        413.658597024,
+        -95.575640659,
+        168.9569702
+      ],
+      "fit_error_mm": 9.994032270859204,
+      "leave_one_out_error_mm": 10.783708251642445,
+      "depth_range_mm": 0.0
+    },
+    {
+      "sample": "sample_0005",
+      "robot_target": "s4",
+      "camera_xyz_mm": [
+        139.10699332374313,
+        0.4632949079993472,
+        626.0
+      ],
+      "robot_xyz_mm": [
+        513.37087898,
+        -129.431296705,
+        85.285254156
+      ],
+      "fit_error_mm": 15.915457132960489,
+      "leave_one_out_error_mm": 18.808176620477806,
+      "depth_range_mm": 13.0
+    },
+    {
+      "sample": "sample_0006",
+      "robot_target": "s5",
+      "camera_xyz_mm": [
+        195.68503127089272,
+        37.18703821985868,
+        385.0
+      ],
+      "robot_xyz_mm": [
+        212.871061955,
+        -150.616545082,
+        180.036028903
+      ],
+      "fit_error_mm": 70.46920988685547,
+      "leave_one_out_error_mm": 88.3923077436492,
+      "depth_range_mm": 67.0
+    },
+    {
+      "sample": "sample_0007",
+      "robot_target": "s6",
+      "camera_xyz_mm": [
+        67.33949308479411,
+        106.04119723438866,
+        429.0
+      ],
+      "robot_xyz_mm": [
+        295.881728898,
+        -64.936748694,
+        65.856721986
+      ],
+      "fit_error_mm": 10.361571023312548,
+      "leave_one_out_error_mm": 11.923658968957353,
+      "depth_range_mm": 7.0
+    },
+    {
+      "sample": "sample_0008",
+      "robot_target": "s7",
+      "camera_xyz_mm": [
+        -0.443458461172489,
+        53.061636629257016,
+        493.0
+      ],
+      "robot_xyz_mm": [
+        376.260759153,
+        -0.10158758,
+        87.58293892
+      ],
+      "fit_error_mm": 7.492609444693967,
+      "leave_one_out_error_mm": 8.134702493230135,
+      "depth_range_mm": 8.0
+    },
+    {
+      "sample": "sample_0009",
+      "robot_target": "s8",
+      "camera_xyz_mm": [
+        -68.55256352662126,
+        33.40865045219102,
+        613.0
+      ],
+      "robot_xyz_mm": [
+        485.981051386,
+        63.905939855,
+        64.747777214
+      ],
+      "fit_error_mm": 11.145202448027774,
+      "leave_one_out_error_mm": 12.507440203426718,
+      "depth_range_mm": 0.0
+    },
+    {
+      "sample": "sample_0010",
+      "robot_target": "s9",
+      "camera_xyz_mm": [
+        -21.0842687617263,
+        -38.631993857084744,
+        578.0
+      ],
+      "robot_xyz_mm": [
+        485.981086571,
+        18.620183078,
+        139.555683436
+      ],
+      "fit_error_mm": 3.455182284419162,
+      "leave_one_out_error_mm": 3.897214219385031,
+      "depth_range_mm": 0.0
+    },
+    {
+      "sample": "sample_0011",
+      "robot_target": "s10",
+      "camera_xyz_mm": [
+        43.900743523384165,
+        -68.33795218705497,
+        567.0
+      ],
+      "robot_xyz_mm": [
+        485.981652278,
+        -54.804962119,
+        170.951440294
+      ],
+      "fit_error_mm": 11.236944030843853,
+      "leave_one_out_error_mm": 12.449940306404287,
+      "depth_range_mm": 11.0
+    },
+    {
+      "sample": "sample_0012",
+      "robot_target": "s11",
+      "camera_xyz_mm": [
+        -93.77184615815897,
+        -72.57546850257278,
+        578.0
+      ],
+      "robot_xyz_mm": [
+        496.421669926,
+        78.310559831,
+        170.951187175
+      ],
+      "fit_error_mm": 17.04698700004762,
+      "leave_one_out_error_mm": 19.053800935681025,
+      "depth_range_mm": 137.0
+    },
+    {
+      "sample": "sample_0013",
+      "robot_target": "s12",
+      "camera_xyz_mm": [
+        -36.642614928246225,
+        -33.81922287813287,
+        395.0
+      ],
+      "robot_xyz_mm": [
+        319.471752161,
+        25.314084465,
+        202.689512175
+      ],
+      "fit_error_mm": 21.78040972941019,
+      "leave_one_out_error_mm": 24.135323413856185,
+      "depth_range_mm": 5.0
+    },
+    {
+      "sample": "sample_0014",
+      "robot_target": "s13",
+      "camera_xyz_mm": [
+        192.75899576116424,
+        33.525367285160144,
+        395.0
+      ],
+      "robot_xyz_mm": [
+        293.171224368,
+        -201.552827985,
+        142.689303651
+      ],
+      "fit_error_mm": 25.445939764306566,
+      "leave_one_out_error_mm": 31.248020966865745,
+      "depth_range_mm": 6.0
+    },
+    {
+      "sample": "sample_0015",
+      "robot_target": "s14",
+      "camera_xyz_mm": [
+        169.9318952341815,
+        -7.258825100137362,
+        518.0
+      ],
+      "robot_xyz_mm": [
+        420.532461228,
+        -181.552422587,
+        135.20355933
+      ],
+      "fit_error_mm": 19.328603720849358,
+      "leave_one_out_error_mm": 21.15391036477911,
+      "depth_range_mm": 9.0
+    },
+    {
+      "sample": "sample_0016",
+      "robot_target": "s15",
+      "camera_xyz_mm": [
+        95.11951267384208,
+        -50.81981776209695,
+        449.0
+      ],
+      "robot_xyz_mm": [
+        373.977877381,
+        -104.513829124,
+        199.71808832
+      ],
+      "fit_error_mm": 18.704933504994212,
+      "leave_one_out_error_mm": 20.857260554512532,
+      "depth_range_mm": 0.0
+    }
+  ]
+}
