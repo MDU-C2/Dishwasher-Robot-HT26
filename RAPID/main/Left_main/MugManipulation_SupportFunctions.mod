@@ -60,39 +60,6 @@ MODULE MugManipulation_SupportFunctions
        RETURN q;
    ENDFUNC
    
-   !Align y axes with normal and align zaxes to a semi optimal vector from robot to mug
-FUNC pos SemiOptimalPickUpOrientation(pos position, pos normal)
-        VAR pos u;
-        VAR pos v;
-        VAR num scaler := 0.2;
-        
-        ! position = mug coordinates in robot frame
-        ! 1. Check if the mug is in the "Danger Zone" (e.g., X > 350)
-        IF (RobName() = "ROB_L" AND position.x < 510 AND position.y < 200 ) THEN
-            ! AREA A: Fingers point RIGHT (sideways logic)
-            u := [0, -1, 0]; 
-        ELSE
-            ! AREA B: Natural Approach (point fingers from robot base to mug)
-            ! This is the "normal" movement you requested.
-            u := position / sqrt(DotProd(position, position));
-        ENDIF
-
-        ! 2. Standard math to make v orthogonal to the normal
-        IF Abs(normal.z) <= Abs(normal.y) AND Abs(normal.z) <= Abs(normal.x) THEN 
-             v := [0, 0, sign(u.z)*scaler];
-        ELSEIF Abs(normal.y) <= Abs(normal.x) AND Abs(normal.y) <= Abs(normal.z) THEN 
-             v := [0, sign(u.y)*scaler, 0];
-        ELSE 
-            v := [sign(u.x)*scaler, 0, 0];
-        ENDIF
-       
-        v := v + u;
-        v := v/sqrt(DotProd(v, v));
-        v := v - Project(v, normal);
-        v := v/sqrt(DotProd(v, v));
-        
-        RETURN v;
-    ENDFUNC
    
       FUNC num ZOffset(pos normal)
         ! If upright, no height change. If on side, nudge 20mm deeper.
@@ -132,6 +99,56 @@ FUNC pos SemiOptimalPickUpOrientation(pos position, pos normal)
      
        
    ENDPROC
+   
+   ! support function to span plane to find the specifit directional vector
+   FUNC pos SemiOptimalPickUpOrientation(pos position,pos normal)
+       
+       ! We want to make the magnitude of cross product of n and v1 to be as big as possible,
+       ! This to make the area between them as big as possible, aka include more information and less distortion
+       
+       ! We also want to make sure that if the mug is laying down (n = [?,?,0]) the vector should be close to [small,small,sgn(mug.pos.z - robtarget.pos.z)] 
+       
+       VAR pos u;
+       VAR pos v;
+       VAR num scaler;
+       scaler := .2; ! weight the normal vector minial value
+       
+!       position := position - dynamicSholderPos(position,350); ! this to gain the vector from the sholder and not the base.
+    
+       TPWrite "dir:" \Pos:=position;
+!        TPWrite "mug:" \Pos:=position;
+       position := position - shoulderPos(position,[250,200,460],75); ! this to gain the vector from the sholder and not the base.
+       
+!!        TPWrite "z vector:" \Pos:=position;
+       
+       u := position/sqrt(DotProd(position,position)); ! robtarget.trans from robot base = [0,0,0] meaning u = pos - [0,0,0] = pos;
+       
+       TPWrite "u:" \Pos:=u;
+            ! generate "easy" vector to span plane
+        !NOTE: we want to grip y and z from negativ to positive  
+           IF Abs(normal.z) <= Abs(normal.y) AND Abs(normal.z) <= Abs(normal.x) THEN ! z is smallest numeric 
+             v := [0,0,sign(u.z)*scaler];
+          ELSEIF Abs(normal.y) <= Abs(normal.x) AND Abs(normal.y) <= Abs(normal.z) THEN ! y is smallest numeric 
+             v := [0,sign(u.y)*scaler,0];
+          ELSE !x is smallest numeric 
+            v := [sign(u.x)*scaler,0,0];
+          ENDIF
+       
+       TPWrite "v:" \Pos:=v;
+       v := v + u;
+       
+       v := v/sqrt(DotProd(v,v));
+       
+       v := v - Project(v,normal);
+       
+       v := v/sqrt(DotProd(v,v));
+       
+      TPWrite "z vector:" \Pos:=v;
+       
+       RETURN v;
+       
+   ENDFUNC
+    
    
    ! get 2 vector non parallel to normal
    PROC SpanPlaneFromNormal(pos normal, INOUT pos e{*})

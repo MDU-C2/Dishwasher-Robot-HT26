@@ -41,7 +41,8 @@ PROC handOverSequence()
         VAR pos offset_dir;
         VAR pos target_pos;
         ! Stagger the height so the grippers are on different levels of the mug
-        CONST num handover_z_offset := -40; 
+        CONST num handover_z_offset := 23; 
+        CONST num handover_y_offset := -8;
        
         target := CRobT(\Tool := tGripper);
         
@@ -60,6 +61,7 @@ PROC handOverSequence()
             target_pos := shared_movement_right.hand_over_pose.position;
             ! Right arm grabs lower (staggered)
             target_pos.z := target_pos.z + handover_z_offset;
+            target_pos.y := target_pos.y + handover_y_offset;
 
             ! Move to safe waiting distance (150mm away)
             target.trans := target_pos - 150 * offset_dir;

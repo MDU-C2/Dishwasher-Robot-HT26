@@ -2,45 +2,73 @@ MODULE MugManipulation
 
     ! fetch up mug
 
-PROC FetchMug(pos mug_position, num offset_lenght, pos mug_normal)
+    PROC FetchMug(pos mug_position, num offset_lenght, pos mug_normal)
         VAR robtarget target;
-        VAR robtarget approach_point;
         VAR orient hand_rotation;
         VAR pos offset_dir;
 
-        ! 1. Math: hand_rotation will now be 'Sideways' if X > 350, otherwise 'Normal'
-        hand_rotation := NormalToOrientationSemiOptimal(mug_position, mug_normal);
-        offset_dir := RotatePointUsingQuaternion([0,0,1], hand_rotation);
-        
-        target := CRobT(\Tool := tGripper);
-        target.rot := hand_rotation;
+        hand_rotation := NormalToOrientationSemiOptimal(mug_position,mug_normal);
+    !   hand_rotation := NormalToOrientation(mug_normal);
+    !   hand_rotation := [0.67, 0.64, 0.29, 0.24];
+    !   hand_rotation := [0.302, -0.271, 0.637, -0.655];
         
         ! Apply calibration offsets
-        mug_position := mug_position + [0,0,1]*zOffset(mug_normal) + ([1,0,0]*x_offset + [0,1,0]*y_offset + [0,0,1]*z_offset);
-        target.trans := mug_position;
-        approach_point := target;
-
-        ! 2. Path Logic: Match the approach style to the area
-        IF (RobName() = "ROB_L" AND mug_position.x < 510 AND mug_position.y < 200) THEN
+        offset_dir := RotatePointUsingQuaternion([0,0,1],hand_rotation);
+        
+        offset_dir.x := Round(offset_dir.x \Dec:=4);
+        offset_dir.y := Round(offset_dir.y \Dec:=4);
+        offset_dir.z := Round(offset_dir.z \Dec:=4);
+        
+        
+        
+                ! 2. Path Logic: Match the approach style to the area
+       ! IF (RobName() = "ROB_L" AND mug_position.x < xval AND mug_position.y < yval) THEN
             ! SIDE APPROACH PATH: Moves to the left corridor
-                    TPWrite "Left side approach";
-            approach_point.trans := mug_position + [0, 300, 0]; 
-        ELSE
+      !           TPWrite "Left side approach";
+      !   approach_point.trans := mug_position + [0, 100, 0]; 
+      !  ELSE
             ! NORMAL PATH: Simply pulls back 100mm along the gripper axis
-            approach_point.trans := mug_position - (offset_dir *50);
-                                TPWrite "normal approach";
+      !      approach_point.trans := mug_position - (offset_dir *100);
+      !                       TPWrite "normal approach";
 
-        ENDIF
+      !   ENDIF
+        
+        target := CRobT(\Tool := tGripper);
+        ConfJ \Off;
 
-        ! 3. EXECUTION
-        MovementProc approach_point, step_size, max_magnitude, v500;
+        TPWrite "mugs pos:" \Pos:=mug_position;
+        mug_position := mug_position + [0,0,1]*zOffset(mug_normal) + ([1,0,0]*x_offset + [0,1,0]*y_offset +[0,0,1]*z_offset);
+       TPWrite "mugs after offsets pos:" \Pos:=mug_position;
+        
+        target.rot := hand_rotation;
+        target.trans := mug_position - offset_dir*offset_lenght;
+        TPWrite "mugs offset pos:" \Pos:=mug_position;
+        moveJ target,v1000,z50,tGripper;
+        MovementProc target,5,max_magnitude,movement_speed;
+        
+        ! grippers out
+        WaitTime(0.2);
         g_GripOut;
+                
+        TPWrite("At mug picking frame");
         
-        MoveL target, movement_speed, fine, tGripper;
-        g_GripIn \HoldForce:=20;
-        WaitTime 0.6; 
+        !pick up mug
+        target.trans := mug_position + offset_dir*gripper_offset;
+        moveL target,movement_speed,z50,tGripper;
+!        MovementProc target,step_size,max_magnitude,movement_speed;
         
-        MoveL approach_point, v800, z50, tGripper;
+        ! grippers in
+        WaitTime(1);
+        
+        g_GripIn;
+        
+!        WaitTime(1);
+!        moveL Offs(target,0,0,30),movement_speed,z50,tGripper;
+        WaitTime(0.2);
+        target.trans := mug_position - offset_dir*offset_lenght + [0,0,1]*offset_z_when_fetching;
+        moveL target,movement_speed,z50,tGripper;
+!        MovementProc target,step_size,max_magnitude,movement_speed;
+        
     ENDPROC
     
   
@@ -48,33 +76,40 @@ PROC handOverSequence()
         VAR robtarget target;
         VAR pos offset_dir;
         VAR pos target_pos;
-        CONST num handover_z_offset := -40; 
+        ! Stagger the height so the grippers are on different levels of the mug
+        CONST num handover_z_offset := 23; 
+        CONST num handover_y_offset := -8;
        
-        ! 1. Get current position/orientation
         target := CRobT(\Tool := tGripper);
+        
+        ! ===========================================================
+        ! THE FIX: FORCE STANDARD ORIENTATION (THE FLIP)
+        ! Instead of keeping the pick angle, we return to the angle 
+        ! where we know the handover is safe and tested.
+        ! ===========================================================
+        target.rot := MugHandOverOrient();
+        offset_dir := RotatePointUsingQuaternion([0,0,1], target.rot);
         
         ConfJ \Off;
 
         IF (RobName() = "ROB_R") THEN
-            ! ===========================================================
             ! RECEIVER ROLE (RIGHT ARM)
-            ! ===========================================================
-            ! Force standard handover rotation
-            target.rot := MugHandOverOrient();
-            offset_dir := RotatePointUsingQuaternion([0,0,1], target.rot);
-            
             target_pos := shared_movement_right.hand_over_pose.position;
+            ! Right arm grabs lower (staggered)
             target_pos.z := target_pos.z + handover_z_offset;
+            target_pos.y := target_pos.y + handover_y_offset;
 
-            ! Move to waiting position (150mm away)
+            ! Move to safe waiting distance (150mm away)
             target.trans := target_pos - 150 * offset_dir;
             MovementProc target, step_size, max_magnitude, movement_speed;
             
             g_GripOut; 
             shared_movement_right.wait_flag := FALSE; 
+            
+            ! Wait for Sequencer to say the Left arm is ready and holding the cup
             WaitUntil shared_movement_right.wait_flag = TRUE; 
             
-            ! Move in for the catch
+            ! Linear move into the mug
             target.trans := target_pos;
             MoveL target, movement_speed, fine, tGripper;
             
@@ -83,34 +118,26 @@ PROC handOverSequence()
             shared_movement_right.wait_flag := FALSE; 
 
         ELSE
-            ! ===========================================================
-            ! GIVER ROLE (LEFT ARM) - THIS IS WHERE THE FLIP HAPPENS
-            ! ===========================================================
-            ! 2. MANDATORY: Overwrite the pickup rotation with Handover rotation
-            ! This ensures the 'target' passed to MovementProc has the NEW angle.
-            target.rot := MugHandOverOrient();
-            
-            ! 3. Get the meeting point coordinates
+            ! GIVER ROLE (LEFT ARM)
             target_pos := shared_movement_left.hand_over_pose.position;
             target.trans := target_pos;
-
-            ! 4. MOVE TO MEETING POINT
-            ! Because 'target.rot' is now different from the current robot state,
-            ! MovementProc will physically rotate (flip) the wrist while moving to center.
+            
+            ! Move to the meeting point while rotating (flipping) to standard orientation
+            ! Using MovementProc here ensures the 'flip' happens safely across the segments
             MovementProc target, step_size, max_magnitude, movement_speed;
             
-            ! Ensure we stop exactly at the handover point
+            ! Stop exactly at the meeting point
             MoveL target, movement_speed, fine, tGripper;
             
-            shared_movement_left.wait_flag := FALSE; ! Signal: "I am ready and flipped"
+            shared_movement_left.wait_flag := FALSE; 
             
+            ! Wait for Right arm to secure the grip
             WaitUntil shared_movement_left.wait_flag = TRUE; 
             
             g_GripOut;
             WaitTime 0.2;
             
-            ! Retreat
-            offset_dir := RotatePointUsingQuaternion([0,0,1], target.rot);
+            ! Retreat safely
             target.trans := target.trans - offset_dir*150;
             MoveL target, movement_speed, z50, tGripper;
             
