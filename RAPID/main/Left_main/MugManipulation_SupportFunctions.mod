@@ -68,7 +68,7 @@ FUNC pos SemiOptimalPickUpOrientation(pos position, pos normal)
         
         ! position = mug coordinates in robot frame
         ! 1. Check if the mug is in the "Danger Zone" (e.g., X > 350)
-        IF (RobName() = "ROB_L" AND position.x < 380 AND position.y < 200 ) THEN
+        IF (RobName() = "ROB_L" AND position.x < 510 AND position.y < 200 ) THEN
             ! AREA A: Fingers point RIGHT (sideways logic)
             u := [0, -1, 0]; 
         ELSE

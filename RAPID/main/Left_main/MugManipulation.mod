@@ -21,16 +21,19 @@ PROC FetchMug(pos mug_position, num offset_lenght, pos mug_normal)
         approach_point := target;
 
         ! 2. Path Logic: Match the approach style to the area
-        IF (RobName() = "ROB_L" AND mug_position.x < 380 AND mug_position.y < 200) THEN
+        IF (RobName() = "ROB_L" AND mug_position.x < 510 AND mug_position.y < 200) THEN
             ! SIDE APPROACH PATH: Moves to the left corridor
-            approach_point.trans := mug_position + [0, 20, 0]; 
+                    TPWrite "Left side approach";
+            approach_point.trans := mug_position + [0, 300, 0]; 
         ELSE
             ! NORMAL PATH: Simply pulls back 100mm along the gripper axis
-            approach_point.trans := mug_position - (offset_dir * 10);
+            approach_point.trans := mug_position - (offset_dir *50);
+                                TPWrite "normal approach";
+
         ENDIF
 
         ! 3. EXECUTION
-        MovementProc approach_point, step_size, max_magnitude, v1000;
+        MovementProc approach_point, step_size, max_magnitude, v500;
         g_GripOut;
         
         MoveL target, movement_speed, fine, tGripper;
