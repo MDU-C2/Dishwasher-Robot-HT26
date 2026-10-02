@@ -36,50 +36,72 @@ MODULE MugManipulation
     ENDPROC
     
   
-    PROC handOverSequence()
+PROC handOverSequence()
         VAR robtarget target;
         VAR pos offset_dir;
         VAR pos target_pos;
-        CONST num handover_z_offset := -30; 
+        ! Stagger the height so the grippers are on different levels of the mug
+        CONST num handover_z_offset := 23; 
+        CONST num handover_y_offset := -8;
        
         target := CRobT(\Tool := tGripper);
+        
+        ! ===========================================================
+        ! THE FIX: FORCE STANDARD ORIENTATION (THE FLIP)
+        ! Instead of keeping the pick angle, we return to the angle 
+        ! where we know the handover is safe and tested.
+        ! ===========================================================
         target.rot := MugHandOverOrient();
         offset_dir := RotatePointUsingQuaternion([0,0,1], target.rot);
         
         ConfJ \Off;
-        
-        IF (RobName() = "ROB_R") THEN
-            target_pos := shared_movement_right.hand_over_pose.position;
-            target_pos.z := target_pos.z + handover_z_offset;
 
-            target.trans := target_pos - 150*offset_dir;
+        IF (RobName() = "ROB_R") THEN
+            ! RECEIVER ROLE (RIGHT ARM)
+            target_pos := shared_movement_right.hand_over_pose.position;
+            ! Right arm grabs lower (staggered)
+            target_pos.z := target_pos.z + handover_z_offset;
+            target_pos.y := target_pos.y + handover_y_offset;
+
+            ! Move to safe waiting distance (150mm away)
+            target.trans := target_pos - 150 * offset_dir;
             MovementProc target, step_size, max_magnitude, movement_speed;
             
             g_GripOut; 
             shared_movement_right.wait_flag := FALSE; 
             
+            ! Wait for Sequencer to say the Left arm is ready and holding the cup
             WaitUntil shared_movement_right.wait_flag = TRUE; 
             
+            ! Linear move into the mug
             target.trans := target_pos;
             MoveL target, movement_speed, fine, tGripper;
             
-          !  WaitTime 0.2; 
             g_GripIn \HoldForce:=20;
-            WaitTime 0.1; 
+            WaitTime 0.5; 
             shared_movement_right.wait_flag := FALSE; 
 
         ELSE
+            ! GIVER ROLE (LEFT ARM)
             target_pos := shared_movement_left.hand_over_pose.position;
             target.trans := target_pos;
+            
+            ! Move to the meeting point while rotating (flipping) to standard orientation
+            ! Using MovementProc here ensures the 'flip' happens safely across the segments
             MovementProc target, step_size, max_magnitude, movement_speed;
+            
+            ! Stop exactly at the meeting point
+            MoveL target, movement_speed, fine, tGripper;
             
             shared_movement_left.wait_flag := FALSE; 
             
+            ! Wait for Right arm to secure the grip
             WaitUntil shared_movement_left.wait_flag = TRUE; 
             
             g_GripOut;
-           ! WaitTime 0.1;
+            WaitTime 0.2;
             
+            ! Retreat safely
             target.trans := target.trans - offset_dir*150;
             MoveL target, movement_speed, z50, tGripper;
             
@@ -153,7 +175,7 @@ MODULE MugManipulation
         ! Define the upward normal [X=0, Y=0, Z=1]
         VAR pos upward_normal := [0,0,-1];
         
-        mug_end_position := [692.0, -424.0, 175.06];
+        mug_end_position := [692.42, -424.85, 175.0];
         
         ! 1. Calculate orientation for the mug to be upright
         ! We use SemiOptimal to ensure the YuMi's elbow stays away from its body
@@ -182,7 +204,7 @@ MODULE MugManipulation
         MoveL Offs(target, 0, 0, offset_height), movement_speed, z50, tGripper;
     ENDPROC
     
-    ! New dynamic version for placing the mug upright in a free slot
+        ! New dynamic version for placing the mug upright in a free slot
     PROC LeaveMugUprightV2(pos mug_end_position, num offset_height)
         VAR robtarget target;
         VAR orient hand_rotation;
@@ -200,8 +222,11 @@ MODULE MugManipulation
         target.rot := hand_rotation;
         target.trans := mug_end_position + [0, 0, offset_height];
         
+                WaitTime 1;
+        
         ! Use MovementProc to handle the transition safely (prevents kinematics errors)
         MovementProc target, step_size, max_magnitude, v1500; 
+        
         
         ! 3. Lower precisely into the slot
         target.trans := mug_end_position;
@@ -214,5 +239,7 @@ MODULE MugManipulation
         ! 5. Fast retreat vertically
         MoveL Offs(target, 0, 0, offset_height), v1500, z50, tGripper;
     ENDPROC
+    
+    
     
 ENDMODULE

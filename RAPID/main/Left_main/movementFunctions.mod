@@ -23,7 +23,7 @@ MODULE movementFunctions
         ! If the target is mathematically reachable in one go, jump there.
         ! This removes the "stuttering" effect of tiny segments.
         IF checkJointValues(desired_target) THEN
-            MoveJ desired_target, movement_speed, z50, tGripper;
+            MoveJ desired_target, movement_speed, fine, tGripper;
             RETURN;
         ENDIF
 
@@ -36,7 +36,7 @@ MODULE movementFunctions
             disc_target := discretizeTarget(current_target,desired_target,step_size);
             
             ! Use z50 (Zone) instead of fine to maintain momentum
-            MoveJ disc_target,movement_speed,z50,tGripper;
+            MoveJ disc_target,movement_speed,fine,tGripper;
             current_target := CRobT(\Tool:=tGripper);
         ENDWHILE
 

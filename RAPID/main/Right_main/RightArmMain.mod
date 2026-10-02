@@ -82,8 +82,8 @@ MODULE RightArmMain
                 
             CASE flag_move_EGM: !EGM movement
 
-                MoveJ shared_movement_right.target,movement_speed,fine,tGripper;
-                EGMfollowCup;
+               ! MoveJ shared_movement_right.target,movement_speed,fine,tGripper;
+                !EGMfollowCup;
                 
             CASE flag_move_calibration:
               ! Change 'fine' to 'z100' for the first move so it doesn't stop at the home target

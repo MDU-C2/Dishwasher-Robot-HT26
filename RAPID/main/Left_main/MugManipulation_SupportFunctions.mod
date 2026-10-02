@@ -40,44 +40,46 @@ MODULE MugManipulation_SupportFunctions
       RETURN q;
    ENDFUNC
    
-   !Align y axes with normal and align zaxes to a semi optimal vector from robot to mug
-   FUNC orient NormalToOrientationSemiOptimal(pos mug_position,pos normal)
-       
-       VAR pos e{3}; ! base frame vectors
-       ! to make it consistant with documentation
-       VAR num x{3};
-       VAR num y{3};
-       VAR num z{3};
-       VAR num buffer{3};
-       VAR num Matrix{3,3};
-       VAR num R{3,3};
+   
+   
+      FUNC orient NormalToOrientationSemiOptimal(pos mug_position, pos normal)
+       VAR pos e{3}; 
+       VAR num x{3}; VAR num y{3}; VAR num z{3};
        VAR orient q;
        
        Normilize normal;
-       
-       ! span the R3 Space
-       SpanPlaneFromNormalSemiOptimal mug_position,normal,e;
-      
-       ! make the Span ortogonal to get proporties of Rotation matrix
+       SpanPlaneFromNormalSemiOptimal mug_position, normal, e;
        OrtogonalMatrix3x3 e;
        
-       
-       ! to make equations more consistant with documentation
-!       PosToNumArr e{1},x;
-!       PosToNumArr e{2},y;
-!       PosToNumArr e{3},z;
-        
-        ! To make the frame "right" compared to the wated outcome
-       PosToNumArr e{1},y;
-       PosToNumArr e{2},z;
-       PosToNumArr e{3},x;
+       ! Map vectors to tool frame: Y is Normal, Z is Approach, X is Side
+       PosToNumArr e{1}, y;
+       PosToNumArr e{2}, z;
+       PosToNumArr e{3}, x;
 
-    
-    !%Chiaverini-Siciliano method
-    q := ChiaveriniSiciliano(x,y,z);!now we have a queternium from a normal vector!
- 
-      RETURN q;
+       q := ChiaveriniSiciliano(x, y, z);
+       RETURN q;
    ENDFUNC
+   
+   
+      FUNC num ZOffset(pos normal)
+        ! If upright, no height change. If on side, nudge 20mm deeper.
+        IF abs(normal.z) >= abs(normal.x) AND abs(normal.z) >= abs(normal.y) THEN
+            RETURN 0;
+        ELSE
+            RETURN -20;
+        ENDIF
+    ENDFUNC
+
+    FUNC pos shoulderPos(pos mug_pos, pos origo, num radius)
+        ! Dynamic shoulder calculation to keep elbows clear
+        IF mug_pos.x < 200 AND mug_pos.y > 200 THEN 
+            RETURN [520, 300, 300];
+        ELSEIF (RobName() = "ROB_L") THEN
+            RETURN [250, 200, 460];
+        ELSE
+            RETURN [250, -200, 460];
+        ENDIF
+    ENDFUNC
   
    ! Convert position to num array
    PROC PosToNumArr(pos p, INOUT num e{*})
@@ -97,6 +99,66 @@ MODULE MugManipulation_SupportFunctions
      
        
    ENDPROC
+   
+   ! support function to span plane to find the specifit directional vector
+   FUNC pos SemiOptimalPickUpOrientation(pos position,pos normal)
+       
+       ! We want to make the magnitude of cross product of n and v1 to be as big as possible,
+       ! This to make the area between them as big as possible, aka include more information and less distortion
+       
+       ! We also want to make sure that if the mug is laying down (n = [?,?,0]) the vector should be close to [small,small,sgn(mug.pos.z - robtarget.pos.z)] 
+       
+       VAR pos u;
+       VAR pos v;
+       VAR num scaler;
+       scaler := .2; ! weight the normal vector minial value
+       
+!       position := position - dynamicSholderPos(position,350); ! this to gain the vector from the sholder and not the base.
+
+
+
+            ! 1. Check if the mug is in the "Danger Zone" (e.g., X > 350)
+            IF (RobName() = "ROB_L" AND position.x < xval AND position.y < yval ) THEN
+                ! AREA A: Fingers point RIGHT (sideways logic)
+                u := [0, -1, 0]; 
+            ELSE
+    
+               TPWrite "dir:" \Pos:=position;
+!        TPWrite "mug:" \Pos:=position;
+               position := position - shoulderPos(position,[250,200,460],75); ! this to gain the vector from the sholder and not the base.
+       
+!!        TPWrite "z vector:" \Pos:=position;
+       
+              u := position/sqrt(DotProd(position,position)); ! robtarget.trans from robot base = [0,0,0] meaning u = pos - [0,0,0] = pos;
+       
+       TPWrite "u:" \Pos:=u;
+       
+            ENDIF
+            ! generate "easy" vector to span plane
+        !NOTE: we want to grip y and z from negativ to positive   
+           IF Abs(normal.z) <= Abs(normal.y) AND Abs(normal.z) <= Abs(normal.x) THEN ! z is smallest numeric 
+             v := [0,0,sign(u.z)*scaler];
+          ELSEIF Abs(normal.y) <= Abs(normal.x) AND Abs(normal.y) <= Abs(normal.z) THEN ! y is smallest numeric 
+             v := [0,sign(u.y)*scaler,0];
+          ELSE !x is smallest numeric 
+            v := [sign(u.x)*scaler,0,0];
+          ENDIF
+       
+       TPWrite "v:" \Pos:=v;
+       v := v + u;
+       
+       v := v/sqrt(DotProd(v,v));
+       
+       v := v - Project(v,normal);
+       
+       v := v/sqrt(DotProd(v,v));
+       
+      TPWrite "z vector:" \Pos:=v;
+       
+       RETURN v;
+       
+   ENDFUNC
+    
    
    ! get 2 vector non parallel to normal
    PROC SpanPlaneFromNormal(pos normal, INOUT pos e{*})
@@ -159,55 +221,6 @@ MODULE MugManipulation_SupportFunctions
         ELSE
            RETURN sholder_pos_close;
         ENDIF
-       
-   ENDFUNC
-   
-   ! support function to span plane to find the specifit directional vector
-   FUNC pos SemiOptimalPickUpOrientation(pos position,pos normal)
-       
-       ! We want to make the magnitude of cross product of n and v1 to be as big as possible,
-       ! This to make the area between them as big as possible, aka include more information and less distortion
-       
-       ! We also want to make sure that if the mug is laying down (n = [?,?,0]) the vector should be close to [small,small,sgn(mug.pos.z - robtarget.pos.z)] 
-       
-       VAR pos u;
-       VAR pos v;
-       VAR num scaler;
-       scaler := .2; ! weight the normal vector minial value
-       
-!       position := position - dynamicSholderPos(position,350); ! this to gain the vector from the sholder and not the base.
-    
-       TPWrite "dir:" \Pos:=position;
-!        TPWrite "mug:" \Pos:=position;
-       position := position - shoulderPos(position,[250,200,460],75); ! this to gain the vector from the sholder and not the base.
-       
-!!        TPWrite "z vector:" \Pos:=position;
-       
-       u := position/sqrt(DotProd(position,position)); ! robtarget.trans from robot base = [0,0,0] meaning u = pos - [0,0,0] = pos;
-       
-       TPWrite "u:" \Pos:=u;
-            ! generate "easy" vector to span plane
-        !NOTE: we want to grip y and z from negativ to positive  
-           IF Abs(normal.z) <= Abs(normal.y) AND Abs(normal.z) <= Abs(normal.x) THEN ! z is smallest numeric 
-             v := [0,0,sign(u.z)*scaler];
-          ELSEIF Abs(normal.y) <= Abs(normal.x) AND Abs(normal.y) <= Abs(normal.z) THEN ! y is smallest numeric 
-             v := [0,sign(u.y)*scaler,0];
-          ELSE !x is smallest numeric 
-            v := [sign(u.x)*scaler,0,0];
-          ENDIF
-       
-       TPWrite "v:" \Pos:=v;
-       v := v + u;
-       
-       v := v/sqrt(DotProd(v,v));
-       
-       v := v - Project(v,normal);
-       
-       v := v/sqrt(DotProd(v,v));
-       
-      TPWrite "z vector:" \Pos:=v;
-       
-       RETURN v;
        
    ENDFUNC
    
@@ -349,17 +362,7 @@ MODULE MugManipulation_SupportFunctions
 !        RETURN ChiaveriniSiciliano(e1,e2,e3);!now we have a queternium from a normal vector!
     ENDFUNC       
     
-      ! the mug is longer if it standing up rather then laying down
-    FUNC num ZOffset(pos normal)
-        
-        ! mug standing upright
-        IF abs(normal.z) >= abs(normal.x) AND abs(normal.z) >= abs(normal.y) THEN
-            RETURN 0;
-        ELSE
-            RETURN -20;
-        ENDIF
-            
-    ENDFUNC
+
     
     FUNC pose HandOverTarget(pose end_target, pose mug_current_target)
         VAR pose middle_target;
@@ -371,25 +374,6 @@ MODULE MugManipulation_SupportFunctions
         middle_target.rot := end_target.rot;
     
         RETURN middle_target;
-    ENDFUNC
-    
-    FUNC pos shoulderPos(pos mug_pos, pos origo, num radius)
-        VAR pos v1;
-        VAR pos s_shoulder;
-        VAR pos h_shoulder;
-        VAR num v1_magn;
-        h_shoulder := [origo.x,origo.y+500,origo.z];
-        
-        v1 := [mug_pos.x - origo.x,mug_pos.y-origo.y,origo.z];
-        s_shoulder :=  [origo.x-v1.x,origo.y-v1.y,v1.z];
-        v1_magn := Sqrt(v1.x*v1.x + v1.y*v1.y);
-        IF mug_pos.x < 200 AND mug_pos.y > 200 THEN 
-            RETURN [520,300,300];
-        ELSEIF v1_magn > radius THEN
-            RETURN s_shoulder;
-        ELSE
-            RETURN h_shoulder;
-        ENDIF
     ENDFUNC
     
     

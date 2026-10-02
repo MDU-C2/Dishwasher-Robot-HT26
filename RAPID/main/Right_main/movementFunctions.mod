@@ -8,7 +8,7 @@ MODULE movementFunctions
 
         ! SPEED OPTIMIZATION: Try direct move first
         IF checkJointValues(desired_target) THEN
-            MoveJ desired_target, movement_speed, z50, tGripper;
+            MoveJ desired_target, movement_speed, fine, tGripper;
             RETURN;
         ENDIF
 
@@ -16,7 +16,7 @@ MODULE movementFunctions
         current_target := CRobT(\Tool:=tGripper);
         WHILE VectMagn(desired_target.trans-current_target.trans) > max_magnitude DO
             disc_target := discretizeTarget(current_target,desired_target,step_size);
-            MoveJ disc_target,movement_speed,z50,tGripper;
+            MoveJ disc_target,movement_speed,fine,tGripper;
             current_target := CRobT(\Tool:=tGripper);
         ENDWHILE
 
