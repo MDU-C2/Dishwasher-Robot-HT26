@@ -7,7 +7,7 @@ from updated_communication import Communication
 # These values are in ROBOT coordinates (mm) relative to base
 # ===========================================================
 # Example: Mug sitting on the left side of the table
-MOCK_COORDS = [450.0, 150.0, 65.0]  # [X, Y, Z] 
+MOCK_COORDS = [381.0, -20, 37.0]  # [X, Y, Z]    motion supervision: MOCK_COORDS = [381.0, 23, 37.0]
 
 # Orientation: [0, 0, 1] means the mug is standing upright
 # [0, 0, -1] means it is upside down
