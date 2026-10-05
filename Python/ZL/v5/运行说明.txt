@@ -1,0 +1,26 @@
+把整个 v5 文件夹拷到学校主机，用 Visual Studio 打开这个文件夹。
+启动文件是 main_tray.py。不要只拷这一个文件。
+
+已安装依赖保持：
+depthai==2.30.0.0
+numpy==2.2.6
+opencv-python==4.12.0.88
+
+在本文件夹里运行 python main_tray.py。
+启动时输入 1、2、3、4、5，或完整模型名。五个都是 v5 系列，没有 v8。
+
+1  marc_yolov5_640         MARC 原模型，输入 640，8 类，含 handle
+2  yolov5s_aug_v1_416      YOLOv5s，aug_v1，输入 416，7 类，无 handle
+3  yolov5s_aug_v1_640      YOLOv5s，aug_v1，输入 640，7 类，无 handle
+4  yolov5s_no_aug_v2_416   YOLOv5s，no_aug_v2，输入 416，7 类，无 handle
+5  yolov5s_no_aug_v2_640   YOLOv5s，no_aug_v2，输入 640，7 类，无 handle
+
+五个模型共用同一套深度配置：
+彩色 720P，预览尺寸等于所选模型输入；左右单目 400P；HIGH_DENSITY；
+Subpixel 关闭；Extended Disparity 开启；深度输出用单目分辨率。
+启动后控制台应出现：
+[DEPTH] mono=400P  ExtendedDisparity=True  Subpixel=False
+这次同时换了模型和深度配置。比较模型前，先固定同一个模型看近距离深度是否有效。
+
+程序仍会连接 192.168.125.1:1025，并可以指挥机器人。OAK 接在这台电脑上。
+外面的 main_tray_vs 原程序没有改。
