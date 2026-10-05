@@ -7,6 +7,7 @@ import camera_setup as cs
 import test_protocol as tp
 import tray_camera
 import threading
+
 #==================================== THREADING SETUP ====================================
 global busy, times_sec, count
 busy = False
@@ -75,7 +76,7 @@ def build_homogeneous(rotation_matrix, translation_vector):
 # "camera" — tray_camera scans the rack and returns a free slot.
 SLOT_SOURCE = "fixed"
 FIXED_SLOT_NAME = "slot_1"
-FIXED_SLOT_COORDS = [302.0, -508, 148.0]  # mm, robot frame; slot_positions.json slot_1
+FIXED_SLOT_COORDS = [302.0, -508, 248.0]  # mm, robot frame; slot_positions.json slot_1
 
 
 def select_placement_slot():
@@ -213,24 +214,22 @@ def local_move(orient, client, target_xyz, normalized_vector, save_protocol, fil
 
                 time.sleep(0.5)
 
-                placed_ok = confirm_placement(
-                    chosen_slot
-                )
-
-                if placed_ok is True:
-
-                    print(
-                        f"[TRAY] Placement verified "
-                        f"in slot '{chosen_slot}'."
+                placed_ok = False
+                while not placed_ok:
+                    placed_ok = confirm_placement(
+                        chosen_slot
                     )
-
-                elif placed_ok is False:
-
+                    if placed_ok:
+                        print(
+                            f"[TRAY] Placement verified "
+                            f"in slot '{chosen_slot}'."
+                        )
+                        break
                     print(
-                        f"[TRAY] WARNING: placement "
-                        f"verification FAILED for "
-                        f"slot '{chosen_slot}'."
+                        "[TRAY] Waiting for mug "
+                        "to appear in dishwasher..."
                     )
+                    time.sleep(0.5)
 
             except Exception as exc:
 
@@ -274,21 +273,14 @@ def local_move(orient, client, target_xyz, normalized_vector, save_protocol, fil
             busy = False
 
 def choose_detection_model():
-    """Ask once which v5 package to load. Numbers follow DETECTION_MODELS order."""
-    keys = list(cs.DETECTION_MODELS)
-    print("选择 v5 检测模型。这次只更换模型，深度配置仍是原来的 400P 设置。")
-    for number, key in enumerate(keys, start=1):
-        print(f"  {number}  {key}")
-        print(f"     {cs.MODEL_DESCRIPTIONS[key]}")
-    accepted = {str(number): key for number, key in enumerate(keys, start=1)}
-    accepted.update({key: key for key in keys})
+    """Ask once which copied detection package to load."""
+    model_by_input = {"5": "v5", "5s": "v5s", "8": "v8"}
     while True:
-        choice = input("输入 1-5，或完整模型名: ").strip()
-        model = accepted.get(choice)
+        choice = input("Run detection model v5, v5s, or v8? Enter 5, 5s, or 8: ").strip().lower()
+        model = model_by_input.get(choice)
         if model is not None:
             print(f"[MODEL] Selected {model}.")
             return model
-        print("无法识别。请输入 1、2、3、4、5，或上面的完整模型名。")
        
 
 
@@ -336,7 +328,7 @@ def run():
             print(f"[TRAY] WARNING: {exc}. Slot lookup will fail until the file exists.")
 
         homogeneous, syncNN, pipeline, labels, rotation_matrix, translation_vector, camera_points, robot_points = cs.camera_setup(cam_coords, robot_file, model_choice)
-#HT1
+
         # rotation_matrix = np.array([
         #     [-0.052720905575654821, -0.40009299202319931, 0.91495688633356154],
         #     [-0.99805997511225542, -0.009274843734204832, -0.061565114737399375],
@@ -347,41 +339,44 @@ def run():
         #     [-59.916837258921817, 34.30217408063033, 332.29792664183373],
         #     dtype=np.float64,
         # )
-#HT2
- #        rotation_matrix = np.array([
-   #          [0.007144178280750622, -0.40899573676986206, 0.9125083276446139],
-     #        [-0.9999562095426, 0.0025942603063787294, 0.008991596669013288],
-       #      [-0.006044808838028906, -0.9125326060571975, -0.40895929280133886],
-         #], dtype=np.float64)
-         #translation_vector = np.array(
-           #  [-59.28905853814081, -6.733211959000464, 323.56564041743616],
-            # dtype=np.float64,
-         #)
-
-#HT3
-
+        
 #        rotation_matrix = np.array([
-#            [0.0126652928, -0.4447759527, 0.8955523113],
- #           [-0.9997857453, 0.0090317358, 0.0186250182],
- #           [-0.0163723521, -0.8955963263, -0.4445662678],
-  #      ], dtype=np.float64)
+ #           [0.007144178280750622, -0.40899573676986206, 0.9125083276446139],
+#            [-0.9999562095426, 0.0025942603063787294, 0.008991596669013288],
+#            [-0.006044808838028906, -0.9125326060571975, -0.40895929280133886],
+#        ], dtype=np.float64)
+#        translation_vector = np.array(
+#            [-59.28905853814081, -6.733211959000464, 323.56564041743616],
+#            dtype=np.float64,
+#        )
 
-   #     translation_vector = np.array(
-    #        [-61.0196898222, -7.0644064788, 327.2554640816],
-    #        dtype=np.float64,
-    #    )
+
+#HT1002, funkade bäst
+		rotation_matrix = np.array([
+			[0.0411876989, 0.3951223237, 0.9177047035],
+			[-0.9991006428, 0.0070268024, 0.0418154225],
+			[-0.0100736773, 0.9186016402, -0.3950563854],
+		], dtype=np.float64)
+		translation_vector = np.array(
+			[-77.3523678182, -12.9968405542, 328.7301604122],
+			dtype=np.float64,
+		)
 
 
-        rotation_matrix = np.array([
-            [0.0411876989, 0.3951223237, 0.9177047035],
-            [-0.9991006428, 0.0070268024, 0.0418154225],
-            [-0.0100736773, 0.9186016402, -0.3950563854],
-        ], dtype=np.float64)
-        translation_vector = np.array(
-            [-77.3523678182, -12.9968405542, 328.7301604122],
-            dtype=np.float64,
-        )
-  
+
+#HT standart offset, HT1005- 16points used of 61
+#		rotation_matrix = np.array([
+#				[0.0177970357, -0.4078098903, 0.9128933995],
+#				[-0.9998374913, -0.0098828949, 0.0150771177],
+#				[0.0028734318, -0.9130133743, -0.4079195039],
+#			], dtype=np.float64)
+#		translation_vector = np.array(
+#				[-121.5552664800, 16.0664362279, 414.6434804753],
+#				dtype=np.float64,
+#			)
+
+
+
         homogeneous = build_homogeneous(rotation_matrix, translation_vector)
 
         # get avg of matrices
@@ -476,29 +471,100 @@ def run():
                 cv.imshow("RGB", frame)
                 key = cv.waitKey(1) & 0xFF
                 # Space sends only the current red box. The next press reads the frame again.
-                if key == ord(' ') and busy == False and selected_target is not None:
+                # ==========================================
+                # AUTOMATIC PICK-AND-PLACE
+                # ==========================================
+                if not busy and selected_target is not None:
                     coords = selected_target.spatialCoordinates
                     label = labels[selected_target.label]
                     conf = int(selected_target.confidence * 100)
-                    target_xyz = cs.convert_coordinates(coords.x, coords.y, coords.z, homogeneous)
-                    print(f"[HT] camera XYZ mm: {coords.x:.1f}, {coords.y:.1f}, {coords.z:.1f}")
-                    print(f"[HT] robot XYZ mm: {target_xyz}")
+                    target_xyz = cs.convert_coordinates(
+                        coords.x,
+                        coords.y,
+                        coords.z,
+                        homogeneous
+                    )
+                    print(
+                        f"[AUTO] Next mug detected "
+                        f"({label}, {conf}%)"
+                    )
+                    print(
+                        f"[HT] camera XYZ mm: "
+                        f"{coords.x:.1f}, "
+                        f"{coords.y:.1f}, "
+                        f"{coords.z:.1f}"
+                    )
+                    print(
+                        f"[HT] robot XYZ mm: "
+                        f"{target_xyz}"
+                    )
                     try:
                         normalized_vector = orientation_map.get(label)
-                        norm = np.matmul(rotation_matrix, normalized_vector)
-                        print(f"[DEBUG] normal vector: {normalized_vector}")
-                        if (abs(normalized_vector[1]) < abs(normalized_vector[2])) or (abs(normalized_vector[1]) < abs(normalized_vector[0])):
-                            norm -= [0, 0, np.dot(norm, [0, 0, 1])]
-                            norm = norm / np.sqrt(np.dot(norm, norm))
-                            np.set_printoptions(precision=3)
+                        norm = np.matmul(
+                            rotation_matrix,
+                            normalized_vector
+                        )
+                        print(
+                            f"[DEBUG] normal vector: "
+                            f"{normalized_vector}"
+                        )
+                        if (
+                            abs(normalized_vector[1])
+                            < abs(normalized_vector[2])
+                        ) or (
+                            abs(normalized_vector[1])
+                            < abs(normalized_vector[0])
+                        ):
+                            norm -= [
+                                0,
+                                0,
+                                np.dot(norm, [0, 0, 1])
+                            ]
+                            norm = (
+                                norm
+                                / np.sqrt(
+                                    np.dot(norm, norm)
+                                )
+                            )
+                            np.set_printoptions(
+                                precision=3
+                            )
                         else:
-                            norm[2] = normalized_vector[1] / abs(normalized_vector[1])
+                            norm[2] = (
+                                normalized_vector[1]
+                                / abs(
+                                    normalized_vector[1]
+                                )
+                            )
                             norm[1] = 0
                             norm[0] = 0
-                        print(f"[DEBUG] normal vector after matrix: {norm}")
-                        threading.Thread(target=local_move, args=(quaternion, client, target_xyz, [float(norm[0]), float(norm[1]), float(norm[2])], save_protocol, file_path, conf, label), daemon=True).start()
+                        print(
+                            f"[DEBUG] normal vector "
+                            f"after matrix: {norm}"
+                        )
+                        threading.Thread(
+                            target=local_move,
+                            args=(
+                                quaternion,
+                                client,
+                                target_xyz,
+                                [
+                                    float(norm[0]),
+                                    float(norm[1]),
+                                    float(norm[2])
+                                ],
+                                save_protocol,
+                                file_path,
+                                conf,
+                                label
+                            ),
+                            daemon=True
+                        ).start()
+                        # Prevent instant re-trigger
+                        time.sleep(0.5)
                     except Exception as e:
                         print(f"Error {e}")
+
                 if key == ord('r'):
                     client.connect()
                 # Exit on 'q' key
