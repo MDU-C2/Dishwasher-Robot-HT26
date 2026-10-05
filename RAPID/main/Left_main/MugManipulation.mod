@@ -5,13 +5,16 @@ MODULE MugManipulation
     PROC FetchMug(pos mug_position, num offset_lenght, pos mug_normal)
         VAR robtarget target;
         VAR orient hand_rotation;
+        VAR robtarget approach_point;
         VAR pos offset_dir;
 
         hand_rotation := NormalToOrientationSemiOptimal(mug_position,mug_normal);
     !   hand_rotation := NormalToOrientation(mug_normal);
     !   hand_rotation := [0.67, 0.64, 0.29, 0.24];
     !   hand_rotation := [0.302, -0.271, 0.637, -0.655];
-        
+    !       hand_rotation := [0.73, 0.68, 0.030, -0.002];
+     
+     
         ! Apply calibration offsets
         offset_dir := RotatePointUsingQuaternion([0,0,1],hand_rotation);
         
@@ -20,31 +23,49 @@ MODULE MugManipulation
         offset_dir.z := Round(offset_dir.z \Dec:=4);
         
         
-        
+         approach_point := target;
+         mug_position.z := 55;
+      
                 ! 2. Path Logic: Match the approach style to the area
-       ! IF (RobName() = "ROB_L" AND mug_position.x < xval AND mug_position.y < yval) THEN
+        IF (RobName() = "ROB_L" AND mug_position.x < xval AND mug_position.y < yval) THEN
+        !IF (RobName() = "ROB_L" AND mug_position.x < 490 ) THEN
             ! SIDE APPROACH PATH: Moves to the left corridor
-      !           TPWrite "Left side approach";
-      !   approach_point.trans := mug_position + [0, 100, 0]; 
+            TPWrite "Left side approach";
+                  !   x_offset := 8;
+                  !   y_offset := -20;
+        
+       !     approach_point.trans := mug_position + [0, 150, 0]; 
+            pSafeEntryLeft.trans  := mug_position + [0, 80, 0]; 
+            MoveJ pSafeEntryLeft, v1500,z150,tGripper;
+            
+        !    approach_point.rot :=  NormalToOrientationSemiOptimal(mug_position,mug_normal);
+            
+        !    MoveJ  approach_point , v1000, fine, tGripper; 
+            
       !  ELSE
             ! NORMAL PATH: Simply pulls back 100mm along the gripper axis
-      !      approach_point.trans := mug_position - (offset_dir *100);
-      !                       TPWrite "normal approach";
+        !    approach_point.trans := mug_position - (offset_dir *50);
+         !                    TPWrite "normal approach";
+            ! x_offset := 0;           
+       !      y_offset := 0;                
+             z_offset := 0; 
 
-      !   ENDIF
+        ENDIF
         
+
+         
         target := CRobT(\Tool := tGripper);
         ConfJ \Off;
 
         TPWrite "mugs pos:" \Pos:=mug_position;
         mug_position := mug_position + [0,0,1]*zOffset(mug_normal) + ([1,0,0]*x_offset + [0,1,0]*y_offset +[0,0,1]*z_offset);
-       TPWrite "mugs after offsets pos:" \Pos:=mug_position;
+        TPWrite "mugs after offsets pos:" \Pos:=mug_position;
         
         target.rot := hand_rotation;
-        target.trans := mug_position - offset_dir*offset_lenght;
+        target.trans := mug_position - offset_dir*10;
         TPWrite "mugs offset pos:" \Pos:=mug_position;
-        moveJ target,v1000,z50,tGripper;
-        MovementProc target,5,max_magnitude,movement_speed;
+      !  moveJ target,v1000,fine,tGripper;
+      !  MovementProc target,5,max_magnitude,movement_speed;
         
         ! grippers out
         WaitTime(0.2);
@@ -54,7 +75,7 @@ MODULE MugManipulation
         
         !pick up mug
         target.trans := mug_position + offset_dir*gripper_offset;
-        moveL target,movement_speed,z50,tGripper;
+        moveL target,v800,fine,tGripper;
 !        MovementProc target,step_size,max_magnitude,movement_speed;
         
         ! grippers in
@@ -65,8 +86,8 @@ MODULE MugManipulation
 !        WaitTime(1);
 !        moveL Offs(target,0,0,30),movement_speed,z50,tGripper;
         WaitTime(0.2);
-        target.trans := mug_position - offset_dir*offset_lenght + [0,0,1]*offset_z_when_fetching;
-        moveL target,movement_speed,z50,tGripper;
+        target.trans := mug_position - offset_dir*offset_lenght + [0,0,1]; ! *offset_z_when_fetching
+        moveJ target,v800,z50,tGripper;
 !        MovementProc target,step_size,max_magnitude,movement_speed;
         
     ENDPROC

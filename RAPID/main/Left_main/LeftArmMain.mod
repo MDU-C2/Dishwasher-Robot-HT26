@@ -4,6 +4,8 @@ MODULE LeftArmMain
 !     Description:  Main module for arm movement which works together with the communication module.
 !    ***********************************************************
 
+!PathAccLim TRUE \AccMax := 50, TRUE \JerkMax := 50;
+
     CONST robtarget home_target := [[609,13,136],[0.56458,0.45107,0.48932,0.48820],[-1,-1,0,4],[-177.987,9E+09,9E+09,9E+09,9E+09,9E+09]];
     CONST robtarget calib_target_outofway:=[[-155.85,250.06,761.03],[0.903777,0.225568,-0.131867,-0.338994],[-1,1,-1,4],[-147.134,9E+09,9E+09,9E+09,9E+09,9E+09]];
     CONST robtarget calib_home_target := [[442.004,-92.0926,300.604],[0.0189937,-0.0236138,0.999427,-0.0150419],[-1,1,-1,4],[-152.666,9E+09,9E+09,9E+09,9E+09,9E+09]];
@@ -13,42 +15,47 @@ MODULE LeftArmMain
     !CONST robtarget pSafeEntryLeft := [[418, 423, 95],[0.36, -0.41, 0.59, -0.59],[0,0,0,4],[-175,9E9,9E9,9E9,9E9,9E9]]; ! new waypoint
    ! CONST robtarget pSafeEntryLeft := [[418, 323, 213],[0.66, 0.66, 0.25, 0.21],[0,0,0,4],[-175,9E9,9E9,9E9,9E9,9E9]]; ! new waypoint
 
-   ! CONST robtarget pSafeEntryLeft := [[208, 323, 195],[0.5, 0.5, 0.5, 0.5],[0,0,0,4],[-175,9E9,9E9,9E9,9E9,9E9]]; ! new waypoint works
+    ! CONST robtarget pSafeEntryLeft := [[300, 266.77, 41],[0.5, 0.5, 0.5, 0.5],[0,0,0,4],[-175,9E9,9E9,9E9,9E9,9E9]]; ! new waypoint works
+    Var robtarget pSafeEntryLeft := [[300, 266.77, 60],[0.697,0.716,0.04,0.02],[0,0,0,4],[-175,9E9,9E9,9E9,9E9,9E9]]; 
     
     ! used for mug manipulation
     CONST pos sholder_pos_close := [110,200,460];
     CONST pos sholder_pos_far := [1000,800,460];
     CONST robtarget cup_target := [[499.548,-110.253,-46.3938],[0.0565402,0.114235,0.990146,-0.0580089],[-2,-3,-1,4],[-177.807,9E+09,9E+09,9E+09,9E+09,9E+09]]; 
         
-    CONST speeddata movement_speed := v500;  !1000
-    CONST speeddata pick_speed := v100; !400
-    CONST speeddata transit_speed := v500; ! Optimization: for fast resets
+    CONST speeddata movement_speed := v400;  !1000
+    CONST speeddata pick_speed := v50; !400
+    CONST speeddata transit_speed := v1500; ! Optimization: for fast resets
     CONST num max_magnitude := 300;         
     
     ! SPEED OPTIMIZATION: Increased step_size for smoother, faster calculation
     CONST num step_size := 150;             
         
     ! used in basic movement
-    CONST num x_offset := -9;           
-    CONST num y_offset := -10;                
-    CONST num z_offset := -1;        
+  !  CONST num x_offset := -9;           
+  !  CONST num y_offset := -10;                
+  !  CONST num z_offset := -1;        
     
-  !  CONST num x_offset := 7;           
+  !  CONST num x_offset := 20;           
    ! CONST num y_offset := -8 ;                
-    !CONST num z_offset := 5; 
-    
+   ! CONST num z_offset := 5; 
+    VAR num x_offset := 0;           
+    VAR num y_offset := 0 ;                
+    VAR num z_offset := 0; 
     
     
     ! used when fetching a mug
     CONST num gripper_offset := 0;    
     CONST num pick_offset := 100;
-    CONST num offset_z_when_fetching := 100; !100
+   ! CONST num offset_z_when_fetching := 100; !100
     
     PROC main()
         
-     !  calib;
+        !calib;
+        !WaitTime 20;
         
-       VAR mug_vector buffer; ! RESTORED
+        
+        VAR mug_vector buffer; ! RESTORED
         
         g_calibrate; 
         TPErase;     
@@ -97,7 +104,7 @@ MODULE LeftArmMain
             CASE flag_move_calibration_home:
                 MoveJ calib_home_target,movement_speed,fine,tGripper;
 
-             CASE flag_move_calibration_outofway: 
+            CASE flag_move_calibration_outofway: 
                 MoveJ calib_target_outofway,transit_speed,z50,tGripper;
   
             CASE flag_pick_up_mug: 

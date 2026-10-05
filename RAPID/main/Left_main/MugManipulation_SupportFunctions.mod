@@ -114,18 +114,29 @@ MODULE MugManipulation_SupportFunctions
        scaler := .2; ! weight the normal vector minial value
        
 !       position := position - dynamicSholderPos(position,350); ! this to gain the vector from the sholder and not the base.
+
+
+
+            ! 1. Check if the mug is in the "Danger Zone" (e.g., X > 350)
+           IF (RobName() = "ROB_L" AND position.x < xval AND position.y < yval ) THEN
+          !  IF (RobName() = "ROB_L" AND position.x <490) THEN
+                ! AREA A: Fingers point RIGHT (sideways logic)
+                u := [0, -1, 0]; 
+            ELSE
     
-       TPWrite "dir:" \Pos:=position;
+               TPWrite "dir:" \Pos:=position;
 !        TPWrite "mug:" \Pos:=position;
-       position := position - shoulderPos(position,[250,200,460],75); ! this to gain the vector from the sholder and not the base.
+               position := position - shoulderPos(position,[250,200,460],75); ! this to gain the vector from the sholder and not the base.
        
 !!        TPWrite "z vector:" \Pos:=position;
        
-       u := position/sqrt(DotProd(position,position)); ! robtarget.trans from robot base = [0,0,0] meaning u = pos - [0,0,0] = pos;
+              u := position/sqrt(DotProd(position,position)); ! robtarget.trans from robot base = [0,0,0] meaning u = pos - [0,0,0] = pos;
        
        TPWrite "u:" \Pos:=u;
+       
+            ENDIF
             ! generate "easy" vector to span plane
-        !NOTE: we want to grip y and z from negativ to positive  
+        !NOTE: we want to grip y and z from negativ to positive   
            IF Abs(normal.z) <= Abs(normal.y) AND Abs(normal.z) <= Abs(normal.x) THEN ! z is smallest numeric 
              v := [0,0,sign(u.z)*scaler];
           ELSEIF Abs(normal.y) <= Abs(normal.x) AND Abs(normal.y) <= Abs(normal.z) THEN ! y is smallest numeric 
