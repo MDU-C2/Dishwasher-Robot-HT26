@@ -252,7 +252,7 @@ MODULE MugManipulation_SupportFunctions
    
    ! project v1 onto v2
    FUNC pos Project(pos v1, pos v2)
-       RETURN v2*(DotProd(v1,v2)/(sqrt(DotProd(v2,v2))));
+       RETURN v2*(DotProd(v1,v2)/(DotProd(v2,v2)));
    ENDFUNC
    
    ! convert 3x3 matrix to queternion
