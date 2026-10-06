@@ -19,7 +19,9 @@ class Communication():
         self._mutex_function = threading.Lock()  #mutex for accessing functions
         self.socket = None
         self.port = 1025
-        self.host = '192.168.125.1'
+       # self.host = '192.168.125.1'
+        self.host = '127.0.0.1'
+
         self.connected = False
 
 
@@ -61,7 +63,7 @@ class Communication():
         "ACK"
         '''
         
-        self.MugCoordinates = [200,-200,100] # x,y,z coordinates of the mug
+        self.MugCoordinates = [400,-200,100] # x,y,z coordinates of the mug
         self.MugOrientation = [1,0,0,0] # quaternion, mug orientation
         self.CalPoint = 1 # calibration point number, corresponds to a point in RAPID
         self.RobTarget = [[200,-200,100],[1,0,0,0],[-1,0,0,0],[9E9,9E9,9E9,9E9,9E9,9E9]] # RAPID format
