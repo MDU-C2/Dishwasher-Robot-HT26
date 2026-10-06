@@ -2,7 +2,9 @@ MODULE MugManipulation
 
     ! ==== FetchMug tuning ====
     CONST num tray_z := 55;                  ! fixed tray height - vision Z is not trusted
+    CONST num tray_z_upside_down := 20;      ! upside-down mugs sit lower in the rack
     CONST num hover_distance := 50;          ! mm back from grasp point along the approach axis
+    CONST num entry_y_offset := 80;          ! entry waypoint Y offset (level with the mug)
     CONST speeddata approach_speed := v100;  ! final linear approach (accuracy over speed)
     CONST speeddata hover_speed := v1000;    ! transit to the hover point
 
@@ -15,27 +17,50 @@ MODULE MugManipulation
         VAR orient hand_rotation;
         VAR pos offset_dir;
         VAR pos grasp_point;
+        VAR pos normal_vec;
 
-        ! ---- 1. Tray reference point (fixed height, not vision Z) ----
-        mug_position.z := tray_z;
+        ! ---- 1. Clean the vision normal ----
+        normal_vec := mug_normal;
+        IF VectMagn(normal_vec) < 0.5 THEN
+            TPWrite "[WARN] FetchMug: bad mug normal, assuming upright";
+            normal_vec := [0, 0, 1];
+        ENDIF
+        normal_vec := normal_vec / VectMagn(normal_vec);
 
-        ! ---- 2. Final grasp point: mug shape + calibration offsets ----
+        ! ---- 2. Grasp height ----
+        IF normal_vec.z < -0.9 THEN
+            mug_position.z := tray_z_upside_down;   ! upside down sits 35mm lower
+        ELSE
+            mug_position.z := tray_z;
+        ENDIF
+
+        ! ---- 3. Final grasp point: mug shape + calibration offsets ----
         ! x_offset / y_offset / z_offset live in LeftArmMain and are shared with
         ! flag_move - only read them here, never write (writing corrupts flag_move).
-        grasp_point := mug_position + [0, 0, 1] * ZOffset(mug_normal) + [x_offset, y_offset, z_offset];
+        grasp_point := mug_position + [0, 0, 1] * ZOffset(normal_vec) + [x_offset, y_offset, z_offset];
         TPWrite "FetchMug grasp point:" \Pos:=grasp_point;
 
-        ! ---- 3. Hand orientation, computed from the point we actually go to ----
-        hand_rotation := NormalToOrientationSemiOptimal(grasp_point, mug_normal);
+        ! ---- 4. Hand orientation ----
+        ! Upright AND upside-down are both fed [0,0,1]: that frame gives a horizontal
+        ! (side) approach axis for both, and stops the wrist flipping 180 deg for an
+        ! upside-down mug. A mug lying on its side keeps its own normal - unchanged,
+        ! it still comes in from above.
+        IF Abs(normal_vec.z) > 0.9 THEN
+            hand_rotation := NormalToOrientationSemiOptimal(grasp_point, [0, 0, 1]);
+            TPWrite "Upright / upside down - side grasp";
+        ELSE
+            hand_rotation := NormalToOrientationSemiOptimal(grasp_point, normal_vec);
+            TPWrite "Lying mug - unchanged approach";
+        ENDIF
         offset_dir := RotatePointUsingQuaternion([0, 0, 1], hand_rotation);
         offset_dir := offset_dir / VectMagn(offset_dir);
 
-        ! ---- 4. Hover point, on the approach axis ----
+        ! ---- 5. Hover point, on the approach axis ----
         target := CRobT(\Tool := tGripper);
         target.rot := hand_rotation;
         target.trans := grasp_point - offset_dir * hover_distance;
 
-        ! ---- 5. Fail before moving anything if the pose is not reachable ----
+        ! ---- 6. Fail before moving anything if the pose is not reachable ----
         IF NOT checkJointValues(target) THEN
             TPWrite "[ERROR] FetchMug: hover point unreachable, skipping pick";
             RETURN;
@@ -47,27 +72,36 @@ MODULE MugManipulation
         ENDIF
         target.trans := grasp_point - offset_dir * hover_distance;
 
-        ! ---- 6. Side entry waypoint, while still at tray height ----
-        IF (RobName() = "ROB_L" AND mug_position.x < xval AND mug_position.y < yval) THEN
-            TPWrite "Left side approach";
-            pSafeEntryLeft.trans := mug_position + [0, 80, 0];
-            MoveJ pSafeEntryLeft, transit_speed, z150, tGripper;
+        ! ---- 7. Entry waypoint: level with the mug, same for EVERY pick ----
+        ! The zone no longer picks the entry - it only picks the orientation
+        ! (SemiOptimalPickUpOrientation): left zone faces -Y, otherwise shoulder direction.
+        IF RobName() = "ROB_L" AND mug_position.x < xval AND mug_position.y < yval THEN
+            TPWrite "Zone: left side orientation";
+        ELSE
+            TPWrite "Zone: normal orientation";
         ENDIF
 
-        ! ---- 7. Open gripper before entering the tray ----
+        pSafeEntryLeft.trans := mug_position + [0, entry_y_offset, 0];
+        IF checkJointValues(pSafeEntryLeft) THEN
+            MoveJ pSafeEntryLeft, transit_speed, z150, tGripper;
+        ELSE
+            TPWrite "[WARN] FetchMug: entry unreachable, going straight to hover";
+        ENDIF
+
+        ! ---- 8. Open gripper before entering the tray ----
         g_GripOut;
 
-        ! ---- 8. Hover: stop exactly on axis so the linear move stays straight ----
+        ! ---- 9. Hover: stop exactly on axis so the linear move stays straight ----
         ConfJ \Off;
         MoveJ target, hover_speed, fine, tGripper;
         TPWrite "At mug picking frame";
 
-        ! ---- 9. Straight, slow approach to the grasp point ----
+        ! ---- 10. Straight, slow approach to the grasp point ----
         target.trans := grasp_point + offset_dir * gripper_offset;
         ConfL \On;      ! no reconfiguration halfway into the mug
         MoveL target, approach_speed, fine, tGripper;
 
-        ! ---- 10. Grip, then let the force build before moving ----
+        ! ---- 11. Grip, then let the force build before moving ----
         g_GripIn \HoldForce:=20;
         WaitTime 0.3;
 
@@ -77,7 +111,7 @@ MODULE MugManipulation
         !                 TPWrite "[WARN] FetchMug: missed mug";
         !                 RETURN;
 
-        ! ---- 11. Pull straight back out along the same axis ----
+        ! ---- 12. Pull straight back out along the same axis ----
         target.trans := grasp_point - offset_dir * offset_lenght;
         MoveL target, movement_speed, fine, tGripper;
 

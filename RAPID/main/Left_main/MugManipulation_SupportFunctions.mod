@@ -108,6 +108,7 @@ MODULE MugManipulation_SupportFunctions
        
        ! We also want to make sure that if the mug is laying down (n = [?,?,0]) the vector should be close to [small,small,sgn(mug.pos.z - robtarget.pos.z)] 
        
+       CONST num normal_left_bias := 0.5; ! how far the normal approach may lean left (0=perpendicular, 1=full left)
        VAR pos u;
        VAR pos v;
        VAR num scaler;
@@ -153,7 +154,18 @@ MODULE MugManipulation_SupportFunctions
        v := v - Project(v,normal);
        
        v := v/sqrt(DotProd(v,v));
-       
+
+       ! ---- Keep the normal approach off the right / base side of the mug ----
+       ! hover = mug - v*50, so v.y > 0 puts the hover at mug.y - 50*v.y: toward
+       ! the robot base and across the other mugs. Flip it to the left and halve
+       ! it, so we only come in "a bit" from the left instead of the full left
+       ! (left-zone axis stays untouched: its v.y is already negative).
+       IF v.y > 0 THEN
+           v.y := -v.y * normal_left_bias;
+           v := v/sqrt(DotProd(v,v));
+           TPWrite "normal approach biased left";
+       ENDIF
+
       TPWrite "z vector:" \Pos:=v;
        
        RETURN v;
