@@ -62,26 +62,25 @@ MODULE MugManipulation
         TPWrite "mugs after offsets pos:" \Pos:=mug_position;
         
         target.rot := hand_rotation;
-        target.trans := mug_position - offset_dir*10;
+        target.trans := mug_position - offset_dir*50; ! 50mm safe hover distance
         TPWrite "mugs offset pos:" \Pos:=mug_position;
-      !  moveJ target,v1000,fine,tGripper;
-      !  MovementProc target,5,max_magnitude,movement_speed;
         
-        ! grippers out
-        WaitTime(0.2);
+        ! grippers out early to save time
         g_GripOut;
+        
+        ! Move to pre-grasp hover position (bypassing MovementProc as requested)
+        MoveJ target, v1000, z10, tGripper;
                 
         TPWrite("At mug picking frame");
         
-        !pick up mug
+        ! pick up mug - slower speed for high accuracy entry
         target.trans := mug_position + offset_dir*gripper_offset;
-        moveL target,v800,fine,tGripper;
-!        MovementProc target,step_size,max_magnitude,movement_speed;
+        MoveL target, v200, fine, tGripper;
         
-        ! grippers in
-        WaitTime(1);
+        ! grippers in - reduced wait since v200 approach is smooth and accurate
+        WaitTime 0.3;
         
-        g_GripIn;
+        g_GripIn \HoldForce:=20;
         
 !        WaitTime(1);
 !        moveL Offs(target,0,0,30),movement_speed,z50,tGripper;
