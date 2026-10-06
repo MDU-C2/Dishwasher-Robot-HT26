@@ -1,94 +1,88 @@
 MODULE MugManipulation
 
+    ! ==== FetchMug tuning ====
+    CONST num tray_z := 55;                  ! fixed tray height - vision Z is not trusted
+    CONST num hover_distance := 50;          ! mm back from grasp point along the approach axis
+    CONST speeddata approach_speed := v100;  ! final linear approach (accuracy over speed)
+    CONST speeddata hover_speed := v1000;    ! transit to the hover point
+
     ! fetch up mug
+    ! Approach axis convention: offset_dir = tool +Z and points AWAY from the mug,
+    ! so  pos - offset_dir*d  = further back,  pos + offset_dir*d  = deeper onto the mug.
 
     PROC FetchMug(pos mug_position, num offset_lenght, pos mug_normal)
         VAR robtarget target;
         VAR orient hand_rotation;
-        VAR robtarget approach_point;
         VAR pos offset_dir;
+        VAR pos grasp_point;
 
-        hand_rotation := NormalToOrientationSemiOptimal(mug_position,mug_normal);
-    !   hand_rotation := NormalToOrientation(mug_normal);
-    !   hand_rotation := [0.67, 0.64, 0.29, 0.24];
-    !   hand_rotation := [0.302, -0.271, 0.637, -0.655];
-    !       hand_rotation := [0.73, 0.68, 0.030, -0.002];
-     
-     
-        ! Apply calibration offsets
-        offset_dir := RotatePointUsingQuaternion([0,0,1],hand_rotation);
-        
-        offset_dir.x := Round(offset_dir.x \Dec:=4);
-        offset_dir.y := Round(offset_dir.y \Dec:=4);
-        offset_dir.z := Round(offset_dir.z \Dec:=4);
-        
-        
-         approach_point := target;
-         mug_position.z := 55;
-      
-                ! 2. Path Logic: Match the approach style to the area
-        IF (RobName() = "ROB_L" AND mug_position.x < xval AND mug_position.y < yval) THEN
-        !IF (RobName() = "ROB_L" AND mug_position.x < 490 ) THEN
-            ! SIDE APPROACH PATH: Moves to the left corridor
-            TPWrite "Left side approach";
-                  !   x_offset := 8;
-                  !   y_offset := -20;
-        
-       !     approach_point.trans := mug_position + [0, 150, 0]; 
-            pSafeEntryLeft.trans  := mug_position + [0, 80, 0]; 
-            MoveJ pSafeEntryLeft, v1500,z150,tGripper;
-            
-        !    approach_point.rot :=  NormalToOrientationSemiOptimal(mug_position,mug_normal);
-            
-        !    MoveJ  approach_point , v1000, fine, tGripper; 
-            
-      !  ELSE
-            ! NORMAL PATH: Simply pulls back 100mm along the gripper axis
-        !    approach_point.trans := mug_position - (offset_dir *50);
-         !                    TPWrite "normal approach";
-            ! x_offset := 0;           
-       !      y_offset := 0;                
-             z_offset := 0; 
+        ! ---- 1. Tray reference point (fixed height, not vision Z) ----
+        mug_position.z := tray_z;
 
-        ENDIF
-        
+        ! ---- 2. Final grasp point: mug shape + calibration offsets ----
+        ! x_offset / y_offset / z_offset live in LeftArmMain and are shared with
+        ! flag_move - only read them here, never write (writing corrupts flag_move).
+        grasp_point := mug_position + [0, 0, 1] * ZOffset(mug_normal) + [x_offset, y_offset, z_offset];
+        TPWrite "FetchMug grasp point:" \Pos:=grasp_point;
 
-         
+        ! ---- 3. Hand orientation, computed from the point we actually go to ----
+        hand_rotation := NormalToOrientationSemiOptimal(grasp_point, mug_normal);
+        offset_dir := RotatePointUsingQuaternion([0, 0, 1], hand_rotation);
+        offset_dir := offset_dir / VectMagn(offset_dir);
+
+        ! ---- 4. Hover point, on the approach axis ----
         target := CRobT(\Tool := tGripper);
-        ConfJ \Off;
-
-        TPWrite "mugs pos:" \Pos:=mug_position;
-        mug_position := mug_position + [0,0,1]*zOffset(mug_normal) + ([1,0,0]*x_offset + [0,1,0]*y_offset +[0,0,1]*z_offset);
-        TPWrite "mugs after offsets pos:" \Pos:=mug_position;
-        
         target.rot := hand_rotation;
-        target.trans := mug_position - offset_dir*50; ! 50mm safe hover distance
-        TPWrite "mugs offset pos:" \Pos:=mug_position;
-        
-        ! grippers out early to save time
+        target.trans := grasp_point - offset_dir * hover_distance;
+
+        ! ---- 5. Fail before moving anything if the pose is not reachable ----
+        IF NOT checkJointValues(target) THEN
+            TPWrite "[ERROR] FetchMug: hover point unreachable, skipping pick";
+            RETURN;
+        ENDIF
+        target.trans := grasp_point + offset_dir * gripper_offset;
+        IF NOT checkJointValues(target) THEN
+            TPWrite "[ERROR] FetchMug: grasp point unreachable, skipping pick";
+            RETURN;
+        ENDIF
+        target.trans := grasp_point - offset_dir * hover_distance;
+
+        ! ---- 6. Side entry waypoint, while still at tray height ----
+        IF (RobName() = "ROB_L" AND mug_position.x < xval AND mug_position.y < yval) THEN
+            TPWrite "Left side approach";
+            pSafeEntryLeft.trans := mug_position + [0, 80, 0];
+            MoveJ pSafeEntryLeft, transit_speed, z150, tGripper;
+        ENDIF
+
+        ! ---- 7. Open gripper before entering the tray ----
         g_GripOut;
-        
-        ! Move to pre-grasp hover position (bypassing MovementProc as requested)
-        MoveJ target, v1000, z10, tGripper;
-                
-        TPWrite("At mug picking frame");
-        
-        ! pick up mug - slower speed for high accuracy entry
-        target.trans := mug_position + offset_dir*gripper_offset;
-        MoveL target, v200, fine, tGripper;
-        
-        ! grippers in - reduced wait since v200 approach is smooth and accurate
-        WaitTime 0.3;
-        
+
+        ! ---- 8. Hover: stop exactly on axis so the linear move stays straight ----
+        ConfJ \Off;
+        MoveJ target, hover_speed, fine, tGripper;
+        TPWrite "At mug picking frame";
+
+        ! ---- 9. Straight, slow approach to the grasp point ----
+        target.trans := grasp_point + offset_dir * gripper_offset;
+        ConfL \On;      ! no reconfiguration halfway into the mug
+        MoveL target, approach_speed, fine, tGripper;
+
+        ! ---- 10. Grip, then let the force build before moving ----
         g_GripIn \HoldForce:=20;
-        
-!        WaitTime(1);
-!        moveL Offs(target,0,0,30),movement_speed,z50,tGripper;
-        WaitTime(0.2);
-        target.trans := mug_position - offset_dir*offset_lenght + [0,0,1]; ! *offset_z_when_fetching
-        moveJ target,v800,z50,tGripper;
-!        MovementProc target,step_size,max_magnitude,movement_speed;
-        
+        WaitTime 0.3;
+
+        ! GRIP CHECK HOOK - enable once the gripper feedback API is confirmed:
+        !   read jaw position / object detection after closing;
+        !   if no object: g_GripOut;
+        !                 TPWrite "[WARN] FetchMug: missed mug";
+        !                 RETURN;
+
+        ! ---- 11. Pull straight back out along the same axis ----
+        target.trans := grasp_point - offset_dir * offset_lenght;
+        MoveL target, movement_speed, fine, tGripper;
+
+        ConfJ \On;      ! restore the state main() expects
+        ConfL \On;
     ENDPROC
     
   
