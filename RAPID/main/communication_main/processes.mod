@@ -209,7 +209,7 @@ MODULE processes
                 buffer.position.z := 65;
             ENDIF
         ENDIF
-        buffer.position.z := 35;
+        buffer.position.z := 55;
 
         ! DECISION LOGIC
         IF buffer.position.y < -10000 THEN
