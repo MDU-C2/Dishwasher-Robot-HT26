@@ -202,7 +202,6 @@ MODULE processes
         shared_movement_right.flag := flag_nothing;
         
         buffer := GetRobVector();
-        
         ! Ensure Z-safety
         IF abs(buffer.normal.z) < abs(buffer.normal.x) AND abs(buffer.normal.z) < abs(buffer.normal.y) THEN
             IF buffer.position.z < 65 THEN
@@ -250,7 +249,7 @@ MODULE processes
             
             leaveSequence;
             
-                    ! ===========================================================
+        ! ===========================================================
         ! NEW: MANDATORY STATE RESET
         ! ===========================================================
         ! 1. Clear flags so arms don't accidentally re-trigger
@@ -277,15 +276,15 @@ MODULE processes
         shared_movement_right.wait_flag := TRUE;
         
         ! C. Wait for Right arm to finish physical gripping
-      !  WaitUntil shared_movement_right.wait_flag = FALSE;
-        WaitTime 1.6; ! buffer for right to have gripped 1.2
+        WaitUntil shared_movement_right.wait_flag = FALSE;
+        !WaitTime 1.2; ! buffer for right to have gripped 1.2
         
         ! D. Tell Left arm to RELEASE and move back
         shared_movement_left.wait_flag := TRUE;
         
         ! E. Wait for Left arm to signal it is clear
-     WaitUntil shared_movement_left.wait_flag = FALSE;
-      ! WaitTime 1;
+        WaitUntil shared_movement_left.wait_flag = FALSE;
+        !WaitTime 1;
         
         ! Reset flags
         shared_movement_left.flag := flag_nothing;
