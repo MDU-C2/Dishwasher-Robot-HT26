@@ -16,7 +16,16 @@ MODULE LeftArmMain
    ! CONST robtarget pSafeEntryLeft := [[418, 323, 213],[0.66, 0.66, 0.25, 0.21],[0,0,0,4],[-175,9E9,9E9,9E9,9E9,9E9]]; ! new waypoint
 
     ! CONST robtarget pSafeEntryLeft := [[300, 266.77, 41],[0.5, 0.5, 0.5, 0.5],[0,0,0,4],[-175,9E9,9E9,9E9,9E9,9E9]]; ! new waypoint works
-    Var robtarget pSafeEntryLeft := [[300, 266.77, 60],[0.697,0.716,0.04,0.02],[0,0,0,4],[-175,9E9,9E9,9E9,9E9,9E9]]; 
+    VAR robtarget pSafeEntryLeftC := [[300, 266.77, 60],[0.697,0.716,0.04,0.02],[0,0,0,4],[-175,9E9,9E9,9E9,9E9,9E9]]; 
+    VAR robtarget pSafeEntryLeft := [[300, 266.77, 60],[0.697,0.716,0.04,0.02],[0,0,0,4],[-175,9E9,9E9,9E9,9E9,9E9]]; 
+    CONST robtarget pSafeEntryNormalC := [[222, 350, 100],[0.466, 0.512,0.499,0.521],[0,0,0,4],[-175,9E9,9E9,9E9,9E9,9E9]]; 
+    VAR robtarget pSafeEntryNormalV := [[222, 350, 100],[0.466, 0.512,0.499,0.521],[0,0,0,4],[-175,9E9,9E9,9E9,9E9,9E9]]; 
+    
+    CONST robtarget pSafeEntryOvanC := [[484.94, 110, 180],[0.03575, 0.72068,-0.69169,0.03029],[0,0,0,4],[-175,9E9,9E9,9E9,9E9,9E9]]; 
+    VAR robtarget pSafeEntryOvanC2 := [[484.94, 110, 180],[0.03575, 0.72068,-0.69169,0.03029],[0,0,0,4],[-175,9E9,9E9,9E9,9E9,9E9]]; 
+
+
+   
     
     ! used for mug manipulation
     CONST pos sholder_pos_close := [110,200,460];
@@ -25,7 +34,7 @@ MODULE LeftArmMain
         
     CONST speeddata movement_speed := v400;  !1000
     CONST speeddata pick_speed := v50; !400
-    CONST speeddata transit_speed := v1500; ! Optimization: for fast resets
+    CONST speeddata transit_speed := v300; ! Optimization: for fast resets
     CONST num max_magnitude := 300;         
     
     ! SPEED OPTIMIZATION: Increased step_size for smoother, faster calculation
@@ -54,7 +63,7 @@ MODULE LeftArmMain
         !calib;
         !WaitTime 20;
         
-        
+
         VAR mug_vector buffer; ! RESTORED
         
         g_calibrate; 

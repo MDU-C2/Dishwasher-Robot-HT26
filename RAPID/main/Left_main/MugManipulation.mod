@@ -1,55 +1,93 @@
 MODULE MugManipulation
 
-    ! fetch up mug
+    CONST robtarget rRightroll := [[477.90, 46.47, 226.92], [0.192592, 0.081852, -0.724543, 0.656693], [0,0,0,4],[-175,9E9,9E9,9E9,9E9,9E9]];  !funka.men för mycket
 
+    ! fetch up mug
     PROC FetchMug(pos mug_position, num offset_lenght, pos mug_normal)
         VAR robtarget target;
         VAR orient hand_rotation;
         VAR robtarget approach_point;
         VAR pos offset_dir;
-
-        hand_rotation := NormalToOrientationSemiOptimal(mug_position,mug_normal);
-    !   hand_rotation := NormalToOrientation(mug_normal);
-    !   hand_rotation := [0.67, 0.64, 0.29, 0.24];
-    !   hand_rotation := [0.302, -0.271, 0.637, -0.655];
-    !       hand_rotation := [0.73, 0.68, 0.030, -0.002];
      
+        
+
+     !   IF mug_position.z < 55 THEN
+            
+            IF (mug_normal.z = 1) THEN
+                mug_position.z := 55;
+                TPWrite "upright fetch";
+            ELSE
+                mug_position.z := 35;
+                
+                TPWrite "downward fetch";
+
+            ENDIF
+     !   ENDIF   
+
+        
+        hand_rotation := NormalToOrientationSemiOptimal(mug_position,mug_normal);
+        
      
         ! Apply calibration offsets
         offset_dir := RotatePointUsingQuaternion([0,0,1],hand_rotation);
-        
         offset_dir.x := Round(offset_dir.x \Dec:=4);
         offset_dir.y := Round(offset_dir.y \Dec:=4);
         offset_dir.z := Round(offset_dir.z \Dec:=4);
         
         
-         approach_point := target;
-         mug_position.z := 55;
+        approach_point := target;
       
-                ! 2. Path Logic: Match the approach style to the area
-        IF (RobName() = "ROB_L" AND mug_position.x < xval AND mug_position.y < yval) THEN
-        !IF (RobName() = "ROB_L" AND mug_position.x < 490 ) THEN
-            ! SIDE APPROACH PATH: Moves to the left corridor
-            TPWrite "Left side approach";
-                  !   x_offset := 8;
-                  !   y_offset := -20;
+    ! Path Logic: Match the approach style to the area
+    
+        g_GripOut;
+                
+        IF (RobName() = "ROB_L" AND mug_position.x > xval AND mug_position.y < 235) THEN !AND mug_position.y > 235
+                            
+            TPWrite "normal approach";
+          !  x_offset := -30; !15 15
+        !   y_offset := -30;
+            x_offset := 5;  !-8
+            y_offset := -22;
+       
         
-       !     approach_point.trans := mug_position + [0, 150, 0]; 
-            pSafeEntryLeft.trans  := mug_position + [0, 80, 0]; 
-            MoveJ pSafeEntryLeft, v1500,z150,tGripper;
-            
-        !    approach_point.rot :=  NormalToOrientationSemiOptimal(mug_position,mug_normal);
-            
-        !    MoveJ  approach_point , v1000, fine, tGripper; 
-            
-      !  ELSE
-            ! NORMAL PATH: Simply pulls back 100mm along the gripper axis
-        !    approach_point.trans := mug_position - (offset_dir *50);
-         !                    TPWrite "normal approach";
-            ! x_offset := 0;           
-       !      y_offset := 0;                
-             z_offset := 0; 
+            IF (mug_normal.z = 1 OR mug_normal.z = -1) THEN
+               
+                MoveJ pSafeEntryNormalC, transit_speed,fine,tGripper;
+                hand_rotation := [0.653281,0.653281,0.270598,0.270598];
+                pSafeEntryNormalV.rot := hand_rotation;
+                pSafeEntryNormalV.trans := mug_position + [-100, 100, 0]; 
+                MoveJ pSafeEntryNormalV, transit_speed,fine,tGripper;
 
+           ELSE
+               MoveJ pSafeEntryOvanC, transit_speed,fine,tGripper;
+               TPWrite "From Above";
+               pSafeEntryNormalV.rot := hand_rotation;
+               pSafeEntryNormalV.trans := mug_position + [0, 0, 40]; 
+               MoveL pSafeEntryNormalV, transit_speed,fine,tGripper;
+
+           ENDIF
+           
+            
+           ! MoveJ pSafeEntryNormalV, transit_speed,fine,tGripper;
+            
+        ELSEIF(RobName() = "ROB_L" AND mug_position.x < xval AND mug_position.y < yval) THEN
+        ! SIDE APPROACH PATH: Moves to the left corridor
+              !if not upright or upside down
+            !  TPWrite "Left side approach";
+            IF (mug_normal.z = 1 OR mug_normal.z = -1) THEN 
+                TPWrite "Left side approach";
+                      !   x_offset := -8;
+                      !   y_offset := -20;
+        
+                pSafeEntryLeft.trans  := mug_position + [0, 60, 0]; 
+                MoveJ pSafeEntryLeft, transit_speed,z50,tGripper;
+                
+            ELSE
+                pSafeEntryOvanC2.trans  := mug_position + [0, 0, 300];
+                TPWrite "Close From Above";
+                MoveJ pSafeEntryOvanC2, transit_speed,fine,tGripper;
+            
+            ENDIF
         ENDIF
         
 
@@ -62,31 +100,26 @@ MODULE MugManipulation
         TPWrite "mugs after offsets pos:" \Pos:=mug_position;
         
         target.rot := hand_rotation;
-        target.trans := mug_position - offset_dir*50; ! 50mm safe hover distance
+        target.trans := mug_position - offset_dir*10;
         TPWrite "mugs offset pos:" \Pos:=mug_position;
-        
-        ! grippers out early to save time
-        g_GripOut;
-        
-        ! Move to pre-grasp hover position (bypassing MovementProc as requested)
-        MoveJ target, v1000, z10, tGripper;
                 
         TPWrite("At mug picking frame");
         
-        ! pick up mug - slower speed for high accuracy entry
-        target.trans := mug_position + offset_dir*gripper_offset;
-        MoveL target, v200, fine, tGripper;
+        !pick up mug
+ !        target.trans := mug_position + offset_dir*gripper_offset;
+         moveL target,v500,fine,tGripper;
         
-        ! grippers in - reduced wait since v200 approach is smooth and accurate
-        WaitTime 0.3;
-        
+        ! grippers in
+        WaitTime(1);
         g_GripIn \HoldForce:=20;
-        
+
 !        WaitTime(1);
-!        moveL Offs(target,0,0,30),movement_speed,z50,tGripper;
+        moveL Offs(target,0,0,30),movement_speed,z50,tGripper;
         WaitTime(0.2);
-        target.trans := mug_position - offset_dir*offset_lenght + [0,0,1]; ! *offset_z_when_fetching
-        moveJ target,v800,z50,tGripper;
+        target.trans := mug_position - offset_dir*offset_lenght + [0,0,20]; ! *offset_z_when_fetching
+
+        
+        moveL target,v500,z50,tGripper; 
 !        MovementProc target,step_size,max_magnitude,movement_speed;
         
     ENDPROC
@@ -127,7 +160,8 @@ PROC handOverSequence()
             shared_movement_right.wait_flag := FALSE; 
             
             ! Wait for Sequencer to say the Left arm is ready and holding the cup
-            WaitUntil shared_movement_right.wait_flag = TRUE; 
+            WaitUntil shared_movement_right.wait_flag = TRUE;  
+            !WaitTime 0.1;
             
             ! Linear move into the mug
             target.trans := target_pos;
@@ -142,9 +176,15 @@ PROC handOverSequence()
             target_pos := shared_movement_left.hand_over_pose.position;
             target.trans := target_pos;
             
+            
+            !right roll first
+            MoveJ rRightroll, vmax, z200, tGripper;
+            
             ! Move to the meeting point while rotating (flipping) to standard orientation
             ! Using MovementProc here ensures the 'flip' happens safely across the segments
             MovementProc target, step_size, max_magnitude, movement_speed;
+             !MoveJ target, movement_speed, fine, tGripper;
+
             
             ! Stop exactly at the meeting point
             MoveL target, movement_speed, fine, tGripper;
