@@ -106,8 +106,7 @@ MODULE MugManipulation_SupportFunctions
        ! We want to make the magnitude of cross product of n and v1 to be as big as possible,
        ! This to make the area between them as big as possible, aka include more information and less distortion
        
-       ! We also want to make sure that if the mug is laying down (n = [?,?,0]) the vector should be close to [small,small,sgn(mug.pos.z - robtarget.pos.z)] 
-       
+       ! We also want to make sure that if the mug is laying down (n = [?,?,0]) the vector should be close to [small,small,sgn(mug.pos.z - robtarget.pos.z)]        
        VAR pos u;
        VAR pos v;
        VAR num scaler;
@@ -115,13 +114,20 @@ MODULE MugManipulation_SupportFunctions
        
 !       position := position - dynamicSholderPos(position,350); ! this to gain the vector from the sholder and not the base.
 
+      
 
-
+     TPWrite "normal dir:" \Orient:= [normal.x,normal.y,normal.z,normal.z];
             ! 1. Check if the mug is in the "Danger Zone" (e.g., X > 350)
-           IF (RobName() = "ROB_L" AND position.x < xval AND position.y < yval ) THEN
+            IF (RobName() = "ROB_L" AND position.x < xval AND position.y < yval AND (normal.z = 1 OR normal.z = -1)) THEN
           !  IF (RobName() = "ROB_L" AND position.x <490) THEN
                 ! AREA A: Fingers point RIGHT (sideways logic)
                 u := [0, -1, 0]; 
+                TPWrite "dir left:" \Pos:=position;
+            ELSEIF (normal.z = 1 OR normal.z = -1) THEN 
+               ! u := [-0.707, 0.707, 0]; 
+                u := [0.707, -0.707, 0]; 
+                TPWrite "normal get close";
+                
             ELSE
     
                TPWrite "dir:" \Pos:=position;
@@ -129,7 +135,8 @@ MODULE MugManipulation_SupportFunctions
                position := position - shoulderPos(position,[250,200,460],75); ! this to gain the vector from the sholder and not the base.
        
 !!        TPWrite "z vector:" \Pos:=position;
-       
+                       TPWrite "from up";
+
               u := position/sqrt(DotProd(position,position)); ! robtarget.trans from robot base = [0,0,0] meaning u = pos - [0,0,0] = pos;
        
        TPWrite "u:" \Pos:=u;
@@ -137,13 +144,13 @@ MODULE MugManipulation_SupportFunctions
             ENDIF
             ! generate "easy" vector to span plane
         !NOTE: we want to grip y and z from negativ to positive   
-           IF Abs(normal.z) <= Abs(normal.y) AND Abs(normal.z) <= Abs(normal.x) THEN ! z is smallest numeric 
+            IF Abs(normal.z) <= Abs(normal.y) AND Abs(normal.z) <= Abs(normal.x) THEN ! z is smallest numeric 
              v := [0,0,sign(u.z)*scaler];
-          ELSEIF Abs(normal.y) <= Abs(normal.x) AND Abs(normal.y) <= Abs(normal.z) THEN ! y is smallest numeric 
+            ELSEIF Abs(normal.y) <= Abs(normal.x) AND Abs(normal.y) <= Abs(normal.z) THEN ! y is smallest numeric 
              v := [0,sign(u.y)*scaler,0];
-          ELSE !x is smallest numeric 
+            ELSE !x is smallest numeric 
             v := [sign(u.x)*scaler,0,0];
-          ENDIF
+            ENDIF
        
        TPWrite "v:" \Pos:=v;
        v := v + u;
@@ -252,7 +259,7 @@ MODULE MugManipulation_SupportFunctions
    
    ! project v1 onto v2
    FUNC pos Project(pos v1, pos v2)
-       RETURN v2*(DotProd(v1,v2)/(DotProd(v2,v2)));
+       RETURN v2*(DotProd(v1,v2)/(sqrt(DotProd(v2,v2))));
    ENDFUNC
    
    ! convert 3x3 matrix to queternion
