@@ -28,7 +28,8 @@ MODULE MugManipulation
         target.trans := mug_position + offset_dir*gripper_offset;
         moveL target,v1500,z50,tGripper; ! v1500 movement speed
         
-        g_GripIn \HoldForce:=20;
+     !   g_GripIn \HoldForce:=20;
+        g_GripIn;
     !    WaitTime(0.3); 
         
         target.trans := mug_position - offset_dir*offset_lenght + [0,0,1]*offset_z_when_fetching;
@@ -41,8 +42,7 @@ PROC handOverSequence()
         VAR pos offset_dir;
         VAR pos target_pos;
         ! Stagger the height so the grippers are on different levels of the mug
-        CONST num handover_z_offset := 23; 
-        CONST num handover_y_offset := -8;
+        CONST num handover_z_offset := 20; 
        
         target := CRobT(\Tool := tGripper);
         
@@ -61,7 +61,6 @@ PROC handOverSequence()
             target_pos := shared_movement_right.hand_over_pose.position;
             ! Right arm grabs lower (staggered)
             target_pos.z := target_pos.z + handover_z_offset;
-            target_pos.y := target_pos.y + handover_y_offset;
 
             ! Move to safe waiting distance (150mm away)
             target.trans := target_pos - 150 * offset_dir;
@@ -72,6 +71,7 @@ PROC handOverSequence()
             
             ! Wait for Sequencer to say the Left arm is ready and holding the cup
             WaitUntil shared_movement_right.wait_flag = TRUE; 
+            !WaitTime 5.3;
             
             ! Linear move into the mug
             target.trans := target_pos;
@@ -83,7 +83,7 @@ PROC handOverSequence()
 
         ELSE
             ! GIVER ROLE (LEFT ARM)
-            target_pos := shared_movement_left.hand_over_pose.position;
+            target_pos := shared_movement_right.hand_over_pose.position;
             target.trans := target_pos;
             
             ! Move to the meeting point while rotating (flipping) to standard orientation
@@ -93,10 +93,10 @@ PROC handOverSequence()
             ! Stop exactly at the meeting point
             MoveL target, movement_speed, fine, tGripper;
             
-            shared_movement_left.wait_flag := FALSE; 
+            shared_movement_right.wait_flag := FALSE; 
             
             ! Wait for Right arm to secure the grip
-            WaitUntil shared_movement_left.wait_flag = TRUE; 
+            WaitUntil shared_movement_right.wait_flag = TRUE; 
             
             g_GripOut;
             WaitTime 0.2;
@@ -105,7 +105,7 @@ PROC handOverSequence()
             target.trans := target.trans - offset_dir*150;
             MoveL target, movement_speed, z50, tGripper;
             
-            shared_movement_left.wait_flag := FALSE; 
+            shared_movement_right.wait_flag := FALSE; 
         ENDIF
     ENDPROC
         
