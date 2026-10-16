@@ -1,0 +1,1065 @@
+{
+  "schema_version": 2,
+  "session_id": "20261012_151728_447694",
+  "batch_id": "batch_0020",
+  "saved_at": "2026-10-12T15:18:48.803+02:00",
+  "point_label": "s19",
+  "status": "success",
+  "sampling_mode": "recent_10_distinct_pairs",
+  "record_scope": "camera_only",
+  "robot_correspondence": "unverified",
+  "robot": {
+    "tool": null,
+    "reference_frame": null,
+    "xyz_mm": null,
+    "quaternion": null
+  },
+  "summary": {
+    "status": "success",
+    "target_frames": 10,
+    "buffered_frames": 10,
+    "valid_frames": 10,
+    "invalid_frames": 0,
+    "minimum_accepted_frames": 5,
+    "capture_timeout_s": null,
+    "measurement_method": "aruco_center_depth_backprojection",
+    "std_definition": "sample standard deviation, ddof=1; XYZ axes separately",
+    "note": "Independent received frames may legitimately have identical XYZ values.",
+    "mean_xyz_mm": [
+      -43.51746612195892,
+      71.62007376970834,
+      398.6
+    ],
+    "median_xyz_mm": [
+      -43.68736762017673,
+      71.98574684046667,
+      401.0
+    ],
+    "std_xyz_mm": [
+      0.3817806970547139,
+      0.5090172372452498,
+      3.0983866769659336
+    ],
+    "min_xyz_mm": [
+      -43.84875806986783,
+      70.90865337153201,
+      395.0
+    ],
+    "max_xyz_mm": [
+      -42.87471566668784,
+      72.07370986182997,
+      401.0
+    ]
+  },
+  "frames": [
+    {
+      "index_in_window": 0,
+      "valid": true,
+      "reason": "ok",
+      "age_at_snapshot_s": 0.4479540000320412,
+      "received_at": "2026-10-12T15:18:48.405+02:00",
+      "timing": {
+        "rgb_sequence": 2396,
+        "depth_sequence": 2396,
+        "rgb_host_timestamp_ms": 388374196.214,
+        "depth_host_timestamp_ms": 388374196.253,
+        "host_timestamp_delta_ms": 0.03900003433227539,
+        "rgb_device_timestamp_ms": 80808.55200000001,
+        "depth_device_timestamp_ms": 80808.59,
+        "device_timestamp_delta_ms": 0.037999999985913746,
+        "max_pair_delta_ms": 33.0,
+        "sync_method": "dai.node.Sync groups rgb and depth by timestamp; host then rejects device-timestamp delta above max_pair_delta_ms. Equal sequence numbers are not treated as synchronization."
+      },
+      "measurement": {
+        "pixel_u": 257,
+        "pixel_v": 274,
+        "depth_pixel_u": 257,
+        "depth_pixel_v": 274,
+        "depth_pixel_mapping": "Same u,v index in the aligned depth array. Used only after the depth frame size matches the RGB preview.",
+        "camera_xyz_mm": {
+          "x": -42.87471566668784,
+          "y": 70.9953002379622,
+          "z": 395.0
+        },
+        "units": "mm",
+        "camera_frame": "X right, Y down, Z forward; not zeroed to the first frame",
+        "roi_px": {
+          "x0": 255,
+          "y0": 272,
+          "x1": 260,
+          "y1": 277,
+          "half_size": 2
+        },
+        "valid_depth_count": 24,
+        "roi_pixel_count": 25,
+        "depth_median_mm": 395.0,
+        "depth_std_mm": 1.6939791077198396,
+        "depth_min_mm": 395.0,
+        "depth_max_mm": 401.0,
+        "depth_range_mm": 6.0,
+        "depth_spread_note": "std is the sample standard deviation (ddof=1) of valid depths in the 5x5 neighborhood. The saved Z is their median, so an edge can mix object and background. A small spread does not prove the center surface.",
+        "method": "aruco_center_depth_backprojection",
+        "backprojection_note": "Subpixel marker-centre ray times 5x5 median depth Z; not PnP XYZ",
+        "target_id": 23,
+        "center_subpixel_uv": [
+          256.927990917091,
+          274.10481301626703
+        ],
+        "normalized_center_ray": [
+          -0.10854358396629833,
+          0.1797349373112967,
+          1.0
+        ],
+        "geometry_verification": "pending",
+        "geometry_note": "Inherited from mouse_depth_sampling: depth aligned to RGB, indexed at the distorted RGB pixel, with the RGB ray undistorted once. Matching distorted RGB/depth pixel geometry still requires device-specific verification. This recording does not certify calibration accuracy."
+      },
+      "aruco_selection": {
+        "dictionary": "DICT_6X6_250",
+        "target_id": 23,
+        "detected_ids": [
+          23
+        ],
+        "center_method": "diagonal intersection in undistorted normalized coordinates",
+        "target_count": 1,
+        "corners_px": [
+          [
+            238.0,
+            269.0
+          ],
+          [
+            266.0,
+            261.0
+          ],
+          [
+            275.0,
+            279.0
+          ],
+          [
+            248.0,
+            287.0
+          ]
+        ],
+        "center_px": [
+          256.927990917091,
+          274.10481301626703
+        ]
+      },
+      "files": {}
+    },
+    {
+      "index_in_window": 1,
+      "valid": true,
+      "reason": "ok",
+      "age_at_snapshot_s": 0.4147990000201389,
+      "received_at": "2026-10-12T15:18:48.437+02:00",
+      "timing": {
+        "rgb_sequence": 2397,
+        "depth_sequence": 2397,
+        "rgb_host_timestamp_ms": 388374229.543,
+        "depth_host_timestamp_ms": 388374229.582,
+        "host_timestamp_delta_ms": 0.03900003433227539,
+        "rgb_device_timestamp_ms": 80841.881,
+        "depth_device_timestamp_ms": 80841.91900000001,
+        "device_timestamp_delta_ms": 0.038000000015017577,
+        "max_pair_delta_ms": 33.0,
+        "sync_method": "dai.node.Sync groups rgb and depth by timestamp; host then rejects device-timestamp delta above max_pair_delta_ms. Equal sequence numbers are not treated as synchronization."
+      },
+      "measurement": {
+        "pixel_u": 257,
+        "pixel_v": 275,
+        "depth_pixel_u": 257,
+        "depth_pixel_v": 275,
+        "depth_pixel_mapping": "Same u,v index in the aligned depth array. Used only after the depth frame size matches the RGB preview.",
+        "camera_xyz_mm": {
+          "x": -43.14484417972106,
+          "y": 71.38568665189409,
+          "z": 395.0
+        },
+        "units": "mm",
+        "camera_frame": "X right, Y down, Z forward; not zeroed to the first frame",
+        "roi_px": {
+          "x0": 255,
+          "y0": 273,
+          "x1": 260,
+          "y1": 278,
+          "half_size": 2
+        },
+        "valid_depth_count": 25,
+        "roi_pixel_count": 25,
+        "depth_median_mm": 395.0,
+        "depth_std_mm": 1.9899748742132397,
+        "depth_min_mm": 395.0,
+        "depth_max_mm": 401.0,
+        "depth_range_mm": 6.0,
+        "depth_spread_note": "std is the sample standard deviation (ddof=1) of valid depths in the 5x5 neighborhood. The saved Z is their median, so an edge can mix object and background. A small spread does not prove the center surface.",
+        "method": "aruco_center_depth_backprojection",
+        "backprojection_note": "Subpixel marker-centre ray times 5x5 median depth Z; not PnP XYZ",
+        "target_id": 23,
+        "center_subpixel_uv": [
+          256.568609038552,
+          274.6239187257214
+        ],
+        "normalized_center_ray": [
+          -0.109227453619547,
+          0.18072325734656733,
+          1.0
+        ],
+        "geometry_verification": "pending",
+        "geometry_note": "Inherited from mouse_depth_sampling: depth aligned to RGB, indexed at the distorted RGB pixel, with the RGB ray undistorted once. Matching distorted RGB/depth pixel geometry still requires device-specific verification. This recording does not certify calibration accuracy."
+      },
+      "aruco_selection": {
+        "dictionary": "DICT_6X6_250",
+        "target_id": 23,
+        "detected_ids": [
+          23
+        ],
+        "center_method": "diagonal intersection in undistorted normalized coordinates",
+        "target_count": 1,
+        "corners_px": [
+          [
+            237.0,
+            270.0
+          ],
+          [
+            266.0,
+            261.0
+          ],
+          [
+            275.0,
+            279.0
+          ],
+          [
+            248.0,
+            287.0
+          ]
+        ],
+        "center_px": [
+          256.568609038552,
+          274.6239187257214
+        ]
+      },
+      "files": {}
+    },
+    {
+      "index_in_window": 2,
+      "valid": true,
+      "reason": "ok",
+      "age_at_snapshot_s": 0.3819449999718927,
+      "received_at": "2026-10-12T15:18:48.468+02:00",
+      "timing": {
+        "rgb_sequence": 2398,
+        "depth_sequence": 2398,
+        "rgb_host_timestamp_ms": 388374262.879,
+        "depth_host_timestamp_ms": 388374262.917,
+        "host_timestamp_delta_ms": 0.03799998760223389,
+        "rgb_device_timestamp_ms": 80875.217,
+        "depth_device_timestamp_ms": 80875.254,
+        "device_timestamp_delta_ms": 0.036999999996623956,
+        "max_pair_delta_ms": 33.0,
+        "sync_method": "dai.node.Sync groups rgb and depth by timestamp; host then rejects device-timestamp delta above max_pair_delta_ms. Equal sequence numbers are not treated as synchronization."
+      },
+      "measurement": {
+        "pixel_u": 257,
+        "pixel_v": 274,
+        "depth_pixel_u": 257,
+        "depth_pixel_v": 274,
+        "depth_pixel_mapping": "Same u,v index in the aligned depth array. Used only after the depth frame size matches the RGB preview.",
+        "camera_xyz_mm": {
+          "x": -43.84875806986783,
+          "y": 71.98574684046667,
+          "z": 401.0
+        },
+        "units": "mm",
+        "camera_frame": "X right, Y down, Z forward; not zeroed to the first frame",
+        "roi_px": {
+          "x0": 255,
+          "y0": 272,
+          "x1": 260,
+          "y1": 277,
+          "half_size": 2
+        },
+        "valid_depth_count": 19,
+        "roi_pixel_count": 25,
+        "depth_median_mm": 401.0,
+        "depth_std_mm": 0.0,
+        "depth_min_mm": 401.0,
+        "depth_max_mm": 401.0,
+        "depth_range_mm": 0.0,
+        "depth_spread_note": "std is the sample standard deviation (ddof=1) of valid depths in the 5x5 neighborhood. The saved Z is their median, so an edge can mix object and background. A small spread does not prove the center surface.",
+        "method": "aruco_center_depth_backprojection",
+        "backprojection_note": "Subpixel marker-centre ray times 5x5 median depth Z; not PnP XYZ",
+        "target_id": 23,
+        "center_subpixel_uv": [
+          256.5071573169003,
+          273.99108430762925
+        ],
+        "normalized_center_ray": [
+          -0.10934852386500706,
+          0.17951557815577726,
+          1.0
+        ],
+        "geometry_verification": "pending",
+        "geometry_note": "Inherited from mouse_depth_sampling: depth aligned to RGB, indexed at the distorted RGB pixel, with the RGB ray undistorted once. Matching distorted RGB/depth pixel geometry still requires device-specific verification. This recording does not certify calibration accuracy."
+      },
+      "aruco_selection": {
+        "dictionary": "DICT_6X6_250",
+        "target_id": 23,
+        "detected_ids": [
+          23
+        ],
+        "center_method": "diagonal intersection in undistorted normalized coordinates",
+        "target_count": 1,
+        "corners_px": [
+          [
+            238.0,
+            269.0
+          ],
+          [
+            266.0,
+            261.0
+          ],
+          [
+            275.0,
+            279.0
+          ],
+          [
+            247.0,
+            287.0
+          ]
+        ],
+        "center_px": [
+          256.5071573169003,
+          273.99108430762925
+        ]
+      },
+      "files": {}
+    },
+    {
+      "index_in_window": 3,
+      "valid": true,
+      "reason": "ok",
+      "age_at_snapshot_s": 0.349335000035353,
+      "received_at": "2026-10-12T15:18:48.500+02:00",
+      "timing": {
+        "rgb_sequence": 2399,
+        "depth_sequence": 2399,
+        "rgb_host_timestamp_ms": 388374296.208,
+        "depth_host_timestamp_ms": 388374296.247,
+        "host_timestamp_delta_ms": 0.038999974727630615,
+        "rgb_device_timestamp_ms": 80908.545,
+        "depth_device_timestamp_ms": 80908.584,
+        "device_timestamp_delta_ms": 0.03900000000430737,
+        "max_pair_delta_ms": 33.0,
+        "sync_method": "dai.node.Sync groups rgb and depth by timestamp; host then rejects device-timestamp delta above max_pair_delta_ms. Equal sequence numbers are not treated as synchronization."
+      },
+      "measurement": {
+        "pixel_u": 257,
+        "pixel_v": 274,
+        "depth_pixel_u": 257,
+        "depth_pixel_v": 274,
+        "depth_pixel_mapping": "Same u,v index in the aligned depth array. Used only after the depth frame size matches the RGB preview.",
+        "camera_xyz_mm": {
+          "x": -43.84875806986783,
+          "y": 71.98574684046667,
+          "z": 401.0
+        },
+        "units": "mm",
+        "camera_frame": "X right, Y down, Z forward; not zeroed to the first frame",
+        "roi_px": {
+          "x0": 255,
+          "y0": 272,
+          "x1": 260,
+          "y1": 277,
+          "half_size": 2
+        },
+        "valid_depth_count": 24,
+        "roi_pixel_count": 25,
+        "depth_median_mm": 401.0,
+        "depth_std_mm": 1.6939791077198396,
+        "depth_min_mm": 395.0,
+        "depth_max_mm": 401.0,
+        "depth_range_mm": 6.0,
+        "depth_spread_note": "std is the sample standard deviation (ddof=1) of valid depths in the 5x5 neighborhood. The saved Z is their median, so an edge can mix object and background. A small spread does not prove the center surface.",
+        "method": "aruco_center_depth_backprojection",
+        "backprojection_note": "Subpixel marker-centre ray times 5x5 median depth Z; not PnP XYZ",
+        "target_id": 23,
+        "center_subpixel_uv": [
+          256.5071573169003,
+          273.99108430762925
+        ],
+        "normalized_center_ray": [
+          -0.10934852386500706,
+          0.17951557815577726,
+          1.0
+        ],
+        "geometry_verification": "pending",
+        "geometry_note": "Inherited from mouse_depth_sampling: depth aligned to RGB, indexed at the distorted RGB pixel, with the RGB ray undistorted once. Matching distorted RGB/depth pixel geometry still requires device-specific verification. This recording does not certify calibration accuracy."
+      },
+      "aruco_selection": {
+        "dictionary": "DICT_6X6_250",
+        "target_id": 23,
+        "detected_ids": [
+          23
+        ],
+        "center_method": "diagonal intersection in undistorted normalized coordinates",
+        "target_count": 1,
+        "corners_px": [
+          [
+            238.0,
+            269.0
+          ],
+          [
+            266.0,
+            261.0
+          ],
+          [
+            275.0,
+            279.0
+          ],
+          [
+            247.0,
+            287.0
+          ]
+        ],
+        "center_px": [
+          256.5071573169003,
+          273.99108430762925
+        ]
+      },
+      "files": {}
+    },
+    {
+      "index_in_window": 4,
+      "valid": true,
+      "reason": "ok",
+      "age_at_snapshot_s": 0.3032740000053309,
+      "received_at": "2026-10-12T15:18:48.534+02:00",
+      "timing": {
+        "rgb_sequence": 2400,
+        "depth_sequence": 2400,
+        "rgb_host_timestamp_ms": 388374329.54399997,
+        "depth_host_timestamp_ms": 388374329.58199996,
+        "host_timestamp_delta_ms": 0.03799998760223389,
+        "rgb_device_timestamp_ms": 80941.881,
+        "depth_device_timestamp_ms": 80941.92,
+        "device_timestamp_delta_ms": 0.03900000000430737,
+        "max_pair_delta_ms": 33.0,
+        "sync_method": "dai.node.Sync groups rgb and depth by timestamp; host then rejects device-timestamp delta above max_pair_delta_ms. Equal sequence numbers are not treated as synchronization."
+      },
+      "measurement": {
+        "pixel_u": 257,
+        "pixel_v": 274,
+        "depth_pixel_u": 257,
+        "depth_pixel_v": 274,
+        "depth_pixel_mapping": "Same u,v index in the aligned depth array. Used only after the depth frame size matches the RGB preview.",
+        "camera_xyz_mm": {
+          "x": -43.19266692667779,
+          "y": 70.90865337153201,
+          "z": 395.0
+        },
+        "units": "mm",
+        "camera_frame": "X right, Y down, Z forward; not zeroed to the first frame",
+        "roi_px": {
+          "x0": 255,
+          "y0": 272,
+          "x1": 260,
+          "y1": 277,
+          "half_size": 2
+        },
+        "valid_depth_count": 22,
+        "roi_pixel_count": 25,
+        "depth_median_mm": 395.0,
+        "depth_std_mm": 2.5735921633733314,
+        "depth_min_mm": 395.0,
+        "depth_max_mm": 401.0,
+        "depth_range_mm": 6.0,
+        "depth_spread_note": "std is the sample standard deviation (ddof=1) of valid depths in the 5x5 neighborhood. The saved Z is their median, so an edge can mix object and background. A small spread does not prove the center surface.",
+        "method": "aruco_center_depth_backprojection",
+        "backprojection_note": "Subpixel marker-centre ray times 5x5 median depth Z; not PnP XYZ",
+        "target_id": 23,
+        "center_subpixel_uv": [
+          256.5071573169003,
+          273.99108430762925
+        ],
+        "normalized_center_ray": [
+          -0.10934852386500706,
+          0.17951557815577726,
+          1.0
+        ],
+        "geometry_verification": "pending",
+        "geometry_note": "Inherited from mouse_depth_sampling: depth aligned to RGB, indexed at the distorted RGB pixel, with the RGB ray undistorted once. Matching distorted RGB/depth pixel geometry still requires device-specific verification. This recording does not certify calibration accuracy."
+      },
+      "aruco_selection": {
+        "dictionary": "DICT_6X6_250",
+        "target_id": 23,
+        "detected_ids": [
+          23
+        ],
+        "center_method": "diagonal intersection in undistorted normalized coordinates",
+        "target_count": 1,
+        "corners_px": [
+          [
+            238.0,
+            269.0
+          ],
+          [
+            266.0,
+            261.0
+          ],
+          [
+            275.0,
+            279.0
+          ],
+          [
+            247.0,
+            287.0
+          ]
+        ],
+        "center_px": [
+          256.5071573169003,
+          273.99108430762925
+        ]
+      },
+      "files": {}
+    },
+    {
+      "index_in_window": 5,
+      "valid": true,
+      "reason": "ok",
+      "age_at_snapshot_s": 0.26975699997274205,
+      "received_at": "2026-10-12T15:18:48.580+02:00",
+      "timing": {
+        "rgb_sequence": 2401,
+        "depth_sequence": 2401,
+        "rgb_host_timestamp_ms": 388374362.87299997,
+        "depth_host_timestamp_ms": 388374362.915,
+        "host_timestamp_delta_ms": 0.04200005531311035,
+        "rgb_device_timestamp_ms": 80975.21,
+        "depth_device_timestamp_ms": 80975.253,
+        "device_timestamp_delta_ms": 0.04299999999057036,
+        "max_pair_delta_ms": 33.0,
+        "sync_method": "dai.node.Sync groups rgb and depth by timestamp; host then rejects device-timestamp delta above max_pair_delta_ms. Equal sequence numbers are not treated as synchronization."
+      },
+      "measurement": {
+        "pixel_u": 257,
+        "pixel_v": 274,
+        "depth_pixel_u": 257,
+        "depth_pixel_v": 274,
+        "depth_pixel_mapping": "Same u,v index in the aligned depth array. Used only after the depth frame size matches the RGB preview.",
+        "camera_xyz_mm": {
+          "x": -43.52597717048563,
+          "y": 72.07370986182997,
+          "z": 401.0
+        },
+        "units": "mm",
+        "camera_frame": "X right, Y down, Z forward; not zeroed to the first frame",
+        "roi_px": {
+          "x0": 255,
+          "y0": 272,
+          "x1": 260,
+          "y1": 277,
+          "half_size": 2
+        },
+        "valid_depth_count": 24,
+        "roi_pixel_count": 25,
+        "depth_median_mm": 401.0,
+        "depth_std_mm": 3.0216609311120095,
+        "depth_min_mm": 395.0,
+        "depth_max_mm": 401.0,
+        "depth_range_mm": 6.0,
+        "depth_spread_note": "std is the sample standard deviation (ddof=1) of valid depths in the 5x5 neighborhood. The saved Z is their median, so an edge can mix object and background. A small spread does not prove the center surface.",
+        "method": "aruco_center_depth_backprojection",
+        "backprojection_note": "Subpixel marker-centre ray times 5x5 median depth Z; not PnP XYZ",
+        "target_id": 23,
+        "center_subpixel_uv": [
+          256.927990917091,
+          274.10481301626703
+        ],
+        "normalized_center_ray": [
+          -0.10854358396629833,
+          0.1797349373112967,
+          1.0
+        ],
+        "geometry_verification": "pending",
+        "geometry_note": "Inherited from mouse_depth_sampling: depth aligned to RGB, indexed at the distorted RGB pixel, with the RGB ray undistorted once. Matching distorted RGB/depth pixel geometry still requires device-specific verification. This recording does not certify calibration accuracy."
+      },
+      "aruco_selection": {
+        "dictionary": "DICT_6X6_250",
+        "target_id": 23,
+        "detected_ids": [
+          23
+        ],
+        "center_method": "diagonal intersection in undistorted normalized coordinates",
+        "target_count": 1,
+        "corners_px": [
+          [
+            238.0,
+            269.0
+          ],
+          [
+            266.0,
+            261.0
+          ],
+          [
+            275.0,
+            279.0
+          ],
+          [
+            248.0,
+            287.0
+          ]
+        ],
+        "center_px": [
+          256.927990917091,
+          274.10481301626703
+        ]
+      },
+      "files": {}
+    },
+    {
+      "index_in_window": 6,
+      "valid": true,
+      "reason": "ok",
+      "age_at_snapshot_s": 0.2379310000105761,
+      "received_at": "2026-10-12T15:18:48.629+02:00",
+      "timing": {
+        "rgb_sequence": 2402,
+        "depth_sequence": 2402,
+        "rgb_host_timestamp_ms": 388374396.20900005,
+        "depth_host_timestamp_ms": 388374396.24700004,
+        "host_timestamp_delta_ms": 0.03799998760223389,
+        "rgb_device_timestamp_ms": 81008.546,
+        "depth_device_timestamp_ms": 81008.584,
+        "device_timestamp_delta_ms": 0.03800000000046566,
+        "max_pair_delta_ms": 33.0,
+        "sync_method": "dai.node.Sync groups rgb and depth by timestamp; host then rejects device-timestamp delta above max_pair_delta_ms. Equal sequence numbers are not treated as synchronization."
+      },
+      "measurement": {
+        "pixel_u": 257,
+        "pixel_v": 274,
+        "depth_pixel_u": 257,
+        "depth_pixel_v": 274,
+        "depth_pixel_mapping": "Same u,v index in the aligned depth array. Used only after the depth frame size matches the RGB preview.",
+        "camera_xyz_mm": {
+          "x": -43.19266692667779,
+          "y": 70.90865337153201,
+          "z": 395.0
+        },
+        "units": "mm",
+        "camera_frame": "X right, Y down, Z forward; not zeroed to the first frame",
+        "roi_px": {
+          "x0": 255,
+          "y0": 272,
+          "x1": 260,
+          "y1": 277,
+          "half_size": 2
+        },
+        "valid_depth_count": 21,
+        "roi_pixel_count": 25,
+        "depth_median_mm": 395.0,
+        "depth_std_mm": 2.7774602993176543,
+        "depth_min_mm": 395.0,
+        "depth_max_mm": 401.0,
+        "depth_range_mm": 6.0,
+        "depth_spread_note": "std is the sample standard deviation (ddof=1) of valid depths in the 5x5 neighborhood. The saved Z is their median, so an edge can mix object and background. A small spread does not prove the center surface.",
+        "method": "aruco_center_depth_backprojection",
+        "backprojection_note": "Subpixel marker-centre ray times 5x5 median depth Z; not PnP XYZ",
+        "target_id": 23,
+        "center_subpixel_uv": [
+          256.5071573169003,
+          273.99108430762925
+        ],
+        "normalized_center_ray": [
+          -0.10934852386500706,
+          0.17951557815577726,
+          1.0
+        ],
+        "geometry_verification": "pending",
+        "geometry_note": "Inherited from mouse_depth_sampling: depth aligned to RGB, indexed at the distorted RGB pixel, with the RGB ray undistorted once. Matching distorted RGB/depth pixel geometry still requires device-specific verification. This recording does not certify calibration accuracy."
+      },
+      "aruco_selection": {
+        "dictionary": "DICT_6X6_250",
+        "target_id": 23,
+        "detected_ids": [
+          23
+        ],
+        "center_method": "diagonal intersection in undistorted normalized coordinates",
+        "target_count": 1,
+        "corners_px": [
+          [
+            238.0,
+            269.0
+          ],
+          [
+            266.0,
+            261.0
+          ],
+          [
+            275.0,
+            279.0
+          ],
+          [
+            247.0,
+            287.0
+          ]
+        ],
+        "center_px": [
+          256.5071573169003,
+          273.99108430762925
+        ]
+      },
+      "files": {}
+    },
+    {
+      "index_in_window": 7,
+      "valid": true,
+      "reason": "ok",
+      "age_at_snapshot_s": 0.17146699997829273,
+      "received_at": "2026-10-12T15:18:48.676+02:00",
+      "timing": {
+        "rgb_sequence": 2404,
+        "depth_sequence": 2404,
+        "rgb_host_timestamp_ms": 388374462.874,
+        "depth_host_timestamp_ms": 388374462.91300005,
+        "host_timestamp_delta_ms": 0.03900003433227539,
+        "rgb_device_timestamp_ms": 81075.211,
+        "depth_device_timestamp_ms": 81075.25099999999,
+        "device_timestamp_delta_ms": 0.03999999999359716,
+        "max_pair_delta_ms": 33.0,
+        "sync_method": "dai.node.Sync groups rgb and depth by timestamp; host then rejects device-timestamp delta above max_pair_delta_ms. Equal sequence numbers are not treated as synchronization."
+      },
+      "measurement": {
+        "pixel_u": 257,
+        "pixel_v": 274,
+        "depth_pixel_u": 257,
+        "depth_pixel_v": 274,
+        "depth_pixel_mapping": "Same u,v index in the aligned depth array. Used only after the depth frame size matches the RGB preview.",
+        "camera_xyz_mm": {
+          "x": -43.84875806986783,
+          "y": 71.98574684046667,
+          "z": 401.0
+        },
+        "units": "mm",
+        "camera_frame": "X right, Y down, Z forward; not zeroed to the first frame",
+        "roi_px": {
+          "x0": 255,
+          "y0": 272,
+          "x1": 260,
+          "y1": 277,
+          "half_size": 2
+        },
+        "valid_depth_count": 21,
+        "roi_pixel_count": 25,
+        "depth_median_mm": 401.0,
+        "depth_std_mm": 0.0,
+        "depth_min_mm": 401.0,
+        "depth_max_mm": 401.0,
+        "depth_range_mm": 0.0,
+        "depth_spread_note": "std is the sample standard deviation (ddof=1) of valid depths in the 5x5 neighborhood. The saved Z is their median, so an edge can mix object and background. A small spread does not prove the center surface.",
+        "method": "aruco_center_depth_backprojection",
+        "backprojection_note": "Subpixel marker-centre ray times 5x5 median depth Z; not PnP XYZ",
+        "target_id": 23,
+        "center_subpixel_uv": [
+          256.5071573169003,
+          273.99108430762925
+        ],
+        "normalized_center_ray": [
+          -0.10934852386500706,
+          0.17951557815577726,
+          1.0
+        ],
+        "geometry_verification": "pending",
+        "geometry_note": "Inherited from mouse_depth_sampling: depth aligned to RGB, indexed at the distorted RGB pixel, with the RGB ray undistorted once. Matching distorted RGB/depth pixel geometry still requires device-specific verification. This recording does not certify calibration accuracy."
+      },
+      "aruco_selection": {
+        "dictionary": "DICT_6X6_250",
+        "target_id": 23,
+        "detected_ids": [
+          23
+        ],
+        "center_method": "diagonal intersection in undistorted normalized coordinates",
+        "target_count": 1,
+        "corners_px": [
+          [
+            238.0,
+            269.0
+          ],
+          [
+            266.0,
+            261.0
+          ],
+          [
+            275.0,
+            279.0
+          ],
+          [
+            247.0,
+            287.0
+          ]
+        ],
+        "center_px": [
+          256.5071573169003,
+          273.99108430762925
+        ]
+      },
+      "files": {}
+    },
+    {
+      "index_in_window": 8,
+      "valid": true,
+      "reason": "ok",
+      "age_at_snapshot_s": 0.13733900000806898,
+      "received_at": "2026-10-12T15:18:48.723+02:00",
+      "timing": {
+        "rgb_sequence": 2405,
+        "depth_sequence": 2405,
+        "rgb_host_timestamp_ms": 388374496.202,
+        "depth_host_timestamp_ms": 388374496.248,
+        "host_timestamp_delta_ms": 0.046000003814697266,
+        "rgb_device_timestamp_ms": 81108.54000000001,
+        "depth_device_timestamp_ms": 81108.586,
+        "device_timestamp_delta_ms": 0.04599999998754356,
+        "max_pair_delta_ms": 33.0,
+        "sync_method": "dai.node.Sync groups rgb and depth by timestamp; host then rejects device-timestamp delta above max_pair_delta_ms. Equal sequence numbers are not treated as synchronization."
+      },
+      "measurement": {
+        "pixel_u": 257,
+        "pixel_v": 274,
+        "depth_pixel_u": 257,
+        "depth_pixel_v": 274,
+        "depth_pixel_mapping": "Same u,v index in the aligned depth array. Used only after the depth frame size matches the RGB preview.",
+        "camera_xyz_mm": {
+          "x": -43.84875806986783,
+          "y": 71.98574684046667,
+          "z": 401.0
+        },
+        "units": "mm",
+        "camera_frame": "X right, Y down, Z forward; not zeroed to the first frame",
+        "roi_px": {
+          "x0": 255,
+          "y0": 272,
+          "x1": 260,
+          "y1": 277,
+          "half_size": 2
+        },
+        "valid_depth_count": 17,
+        "roi_pixel_count": 25,
+        "depth_median_mm": 401.0,
+        "depth_std_mm": 0.0,
+        "depth_min_mm": 401.0,
+        "depth_max_mm": 401.0,
+        "depth_range_mm": 0.0,
+        "depth_spread_note": "std is the sample standard deviation (ddof=1) of valid depths in the 5x5 neighborhood. The saved Z is their median, so an edge can mix object and background. A small spread does not prove the center surface.",
+        "method": "aruco_center_depth_backprojection",
+        "backprojection_note": "Subpixel marker-centre ray times 5x5 median depth Z; not PnP XYZ",
+        "target_id": 23,
+        "center_subpixel_uv": [
+          256.5071573169003,
+          273.99108430762925
+        ],
+        "normalized_center_ray": [
+          -0.10934852386500706,
+          0.17951557815577726,
+          1.0
+        ],
+        "geometry_verification": "pending",
+        "geometry_note": "Inherited from mouse_depth_sampling: depth aligned to RGB, indexed at the distorted RGB pixel, with the RGB ray undistorted once. Matching distorted RGB/depth pixel geometry still requires device-specific verification. This recording does not certify calibration accuracy."
+      },
+      "aruco_selection": {
+        "dictionary": "DICT_6X6_250",
+        "target_id": 23,
+        "detected_ids": [
+          23
+        ],
+        "center_method": "diagonal intersection in undistorted normalized coordinates",
+        "target_count": 1,
+        "corners_px": [
+          [
+            238.0,
+            269.0
+          ],
+          [
+            266.0,
+            261.0
+          ],
+          [
+            275.0,
+            279.0
+          ],
+          [
+            247.0,
+            287.0
+          ]
+        ],
+        "center_px": [
+          256.5071573169003,
+          273.99108430762925
+        ]
+      },
+      "files": {}
+    },
+    {
+      "index_in_window": 9,
+      "valid": true,
+      "reason": "ok",
+      "age_at_snapshot_s": 0.0690900000045076,
+      "received_at": "2026-10-12T15:18:48.768+02:00",
+      "timing": {
+        "rgb_sequence": 2407,
+        "depth_sequence": 2407,
+        "rgb_host_timestamp_ms": 388374562.867,
+        "depth_host_timestamp_ms": 388374562.915,
+        "host_timestamp_delta_ms": 0.0480000376701355,
+        "rgb_device_timestamp_ms": 81175.205,
+        "depth_device_timestamp_ms": 81175.253,
+        "device_timestamp_delta_ms": 0.04799999999522697,
+        "max_pair_delta_ms": 33.0,
+        "sync_method": "dai.node.Sync groups rgb and depth by timestamp; host then rejects device-timestamp delta above max_pair_delta_ms. Equal sequence numbers are not treated as synchronization."
+      },
+      "measurement": {
+        "pixel_u": 257,
+        "pixel_v": 274,
+        "depth_pixel_u": 257,
+        "depth_pixel_v": 274,
+        "depth_pixel_mapping": "Same u,v index in the aligned depth array. Used only after the depth frame size matches the RGB preview.",
+        "camera_xyz_mm": {
+          "x": -43.84875806986783,
+          "y": 71.98574684046667,
+          "z": 401.0
+        },
+        "units": "mm",
+        "camera_frame": "X right, Y down, Z forward; not zeroed to the first frame",
+        "roi_px": {
+          "x0": 255,
+          "y0": 272,
+          "x1": 260,
+          "y1": 277,
+          "half_size": 2
+        },
+        "valid_depth_count": 18,
+        "roi_pixel_count": 25,
+        "depth_median_mm": 401.0,
+        "depth_std_mm": 0.0,
+        "depth_min_mm": 401.0,
+        "depth_max_mm": 401.0,
+        "depth_range_mm": 0.0,
+        "depth_spread_note": "std is the sample standard deviation (ddof=1) of valid depths in the 5x5 neighborhood. The saved Z is their median, so an edge can mix object and background. A small spread does not prove the center surface.",
+        "method": "aruco_center_depth_backprojection",
+        "backprojection_note": "Subpixel marker-centre ray times 5x5 median depth Z; not PnP XYZ",
+        "target_id": 23,
+        "center_subpixel_uv": [
+          256.5071573169003,
+          273.99108430762925
+        ],
+        "normalized_center_ray": [
+          -0.10934852386500706,
+          0.17951557815577726,
+          1.0
+        ],
+        "geometry_verification": "pending",
+        "geometry_note": "Inherited from mouse_depth_sampling: depth aligned to RGB, indexed at the distorted RGB pixel, with the RGB ray undistorted once. Matching distorted RGB/depth pixel geometry still requires device-specific verification. This recording does not certify calibration accuracy."
+      },
+      "aruco_selection": {
+        "dictionary": "DICT_6X6_250",
+        "target_id": 23,
+        "detected_ids": [
+          23
+        ],
+        "center_method": "diagonal intersection in undistorted normalized coordinates",
+        "target_count": 1,
+        "corners_px": [
+          [
+            238.0,
+            269.0
+          ],
+          [
+            266.0,
+            261.0
+          ],
+          [
+            275.0,
+            279.0
+          ],
+          [
+            247.0,
+            287.0
+          ]
+        ],
+        "center_px": [
+          256.5071573169003,
+          273.99108430762925
+        ]
+      },
+      "files": {}
+    }
+  ],
+  "representative_files": {
+    "rgb": "representative_rgb.png",
+    "marked": "representative_marked.png",
+    "depth": "representative_depth.npy"
+  },
+  "save_all_frames": false,
+  "context": {
+    "device_mxid": "1944301011FF704800",
+    "camera_matrix": [
+      [
+        519.622802734375,
+        0.0,
+        313.6154479980469
+      ],
+      [
+        0.0,
+        519.2318115234375,
+        180.33836364746094
+      ],
+      [
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "distortion_coefficients": [
+      7.7514848709106445,
+      -83.1294937133789,
+      -0.0009658988565206528,
+      -0.00023067633446771652,
+      248.31565856933594,
+      7.538883209228516,
+      -81.77393341064453,
+      244.55763244628906,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      -0.0025037508457899094,
+      -0.0017170351929962635
+    ],
+    "distortion_order": [
+      "k1",
+      "k2",
+      "p1",
+      "p2",
+      "k3",
+      "k4",
+      "k5",
+      "k6",
+      "s1",
+      "s2",
+      "s3",
+      "s4",
+      "tau_x",
+      "tau_y"
+    ],
+    "distortion_model_name": "CameraModel.Perspective",
+    "factory_calibration_size_px": [
+      3840,
+      2160
+    ],
+    "opencv_version": "4.12.0",
+    "depthai_version": "2.30.0.0",
+    "method": "aruco_center_depth_backprojection",
+    "target_id": 23
+  },
+  "geometry_note": "Inherited from mouse_depth_sampling: depth aligned to RGB, indexed at the distorted RGB pixel, with the RGB ray undistorted once. Matching distorted RGB/depth pixel geometry still requires device-specific verification. This recording does not certify calibration accuracy.",
+  "note": "Only success batches with a verified robot point correspondence may enter HT fitting."
+}

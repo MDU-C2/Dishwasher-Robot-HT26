@@ -1,0 +1,186 @@
+--- V2_original/aruco_center_sampling.py
++++ V2_ALIGNED/aruco_center_sampling.py
+@@ -1,6 +1,7 @@
+ """ArUco centre XYZ sampling using the existing OAK RGB/Depth pipeline.
+ 
+ S snapshots the latest 10 distinct synchronized RGB/Depth pairs (no waiting):
++  first S = HOMEpos, then s1..s60; EVERY S advances even on failed samples.
+   >=5 valid pairs -> one batch with XYZ stats, otherwise a failed attempt log.
+ F saves one current frame for diagnostics; Space freezes/unfreezes display; Q exits.
+ Depth stereo backprojection is the primary XYZ, not PnP. No robot control.
+@@ -26,6 +27,7 @@
+ 
+ SESSION_ROOT = Path(__file__).resolve().parent / "aruco_center_sessions"
+ METHOD = "aruco_center_depth_backprojection"
++VERSION = "V2-ALIGNED (V2 functions + fixed RAPID labels)"
+ MAX_FRAME_AGE_S = 0.5
+ GEOMETRY_NOTE = (
+     "Inherited from mouse_depth_sampling: depth aligned to RGB, indexed at the "
+@@ -164,6 +166,42 @@
+ 
+ 
+ 
++class PointSchedule:
++    """One RAPID label per S keypress, never per successful save.
++
++    Normal mode: index 0 -> HOMEpos, 1..60 -> s1..s60.
++    V2 custom --point-label/--point-prefix flags remain available for debugging,
++    but should not be used for the HOMEpos,s1..s60 acquisition campaign.
++    """
++
++    def __init__(self, point_label=None, point_prefix="s", point_start=0):
++        if point_start < 0:
++            raise ValueError("--point-start must be >= 0")
++        if point_label is None and point_prefix == "s" and point_start > 60:
++            raise ValueError("RAPID schedule has indices 0..60 only")
++        self.fixed = point_label
++        self.prefix = point_prefix
++        self.start = point_start
++        self.attempt_count = 0
++
++    def peek(self):
++        if self.fixed is not None:
++            return self.fixed
++        index = self.start + self.attempt_count
++        if self.prefix == "s":
++            if index > 60:
++                return None
++            return "HOMEpos" if index == 0 else f"s{index}"
++        return f"{self.prefix}{index}"
++
++    def consume(self):
++        """Call immediately on every S press BEFORE any frame or disk checks."""
++        label = self.peek()
++        if label is not None:
++            self.attempt_count += 1
++        return label
++
++
+ def next_number(session, prefix):
+     """Assign a new per-session sequential name, without overwriting prior files."""
+     numbers = []
+@@ -267,23 +305,23 @@
+         shutil.rmtree(temp, ignore_errors=True)
+         raise
+ 
+-    # Index failure must not accidentally relabel a failed attempt as valid.
+-    if summary["status"] == "success":
+-        append_batch_index(session, summary, label, batch_name, saved_at)
++    # Persist both SUCCESS and FAILED attempts under their original RAPID label.
++    # Never use the row number of successful samples to match robot targets.
++    append_batch_index(session, summary, label, batch_name, saved_at)
+     return final / "sample.json"
+ 
+ 
+-def run(target_id, point_label, point_prefix="s", point_start=1, save_all_frames=False):
++def run(target_id, point_label=None, point_prefix="s", point_start=0, save_all_frames=False):
+     detector = cv2.aruco.ArucoDetector(
+         cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_250), cv2.aruco.DetectorParameters()
+     )
+     recent = RecentFrameBuffer(WINDOW_SIZE)
+     latest = frozen = None
+     notice = "Waiting for RGB/depth"
+-    successful_batch_count = 0
++    schedule = PointSchedule(point_label, point_prefix, point_start)
+ 
+     def active_label():
+-        return point_label if point_label is not None else f"{point_prefix}{point_start + successful_batch_count}"
++        return schedule.peek() or "COMPLETE (HOMEpos + s1..s60)"
+ 
+     try:
+         with dai.Device(base.build_pipeline()) as device:
+@@ -308,6 +346,9 @@
+                 "session_id": session.name, "point_label": point_label,
+                 "automatic_point_prefix": point_prefix,
+                 "automatic_point_start": point_start,
++                "app_version": VERSION,
++                "point_schedule": "HOMEpos,s1,s2,...,s60" if point_label is None and point_prefix == "s" else "custom V2 override",
++                "numbering_rule": "every S consumes one label, even if camera invalid or disk save fails; F does not",
+                 "context": context, "image_configuration": base.image_configuration(),
+                 "geometry_note": GEOMETRY_NOTE,
+                 "max_pair_delta_ms": base.MAX_PAIR_DELTA_MS,
+@@ -322,6 +363,11 @@
+             queue = device.getOutputQueue(name="sync", maxSize=1, blocking=False)
+             for name in ("OAK ArUco centre", "OAK centre depth"):
+                 cv2.namedWindow(name, cv2.WINDOW_AUTOSIZE)
++            print("=" * 65)
++            print("STARTING:", VERSION)
++            print("KEYS: S = ten-frame batch | F = single frame | SPACE = freeze | Q = quit")
++            print("RAPID LABELS: HOMEpos, s1 ... s60; every S consumes one label")
++            print("=" * 65)
+             print("Session:", session)
+             print(f"ID {target_id}: S snapshots last 10 new pairs (>=5 valid); F saves one frame; space freezes; Q quits")
+             print("No sampling wait or timeout. S requires LIVE display. Camera-only XYZ; no robot offsets.")
+@@ -384,7 +430,8 @@
+                         lines.append(f"Valid {measurement['valid_depth_count']}/25 | range {measurement['depth_range_mm']:.1f} mm")
+ 
+                 lines.extend([
+-                    f"Next {active_label()} | last {len(recent)}/{WINDOW_SIZE} pairs | {current_summary['valid_frames']}/{WINDOW_SIZE} valid",
++                    f"{VERSION} | next {active_label()}",
++                    f"Last {len(recent)}/{WINDOW_SIZE} pairs | {current_summary['valid_frames']}/{WINDOW_SIZE} valid",
+                     "FROZEN: S disabled" if frozen is not None else "LIVE",
+                     "S batch snapshot | F one frame | space freeze/live | Q quit",
+                     notice,
+@@ -404,26 +451,35 @@
+                         frozen = displayed
+                         notice = "Frozen frame for F debug; S batch requires LIVE"
+                 elif key == ord("s"):
+-                    if frozen is not None:
+-                        notice = "Not saved: unfreeze before S batch snapshot"
++                    # Critical invariant: acquire the NEXT RAPID label as soon as S is
++                    # pressed, not after validating frames or saving to disk.
++                    label = schedule.consume()
++                    if label is None:
++                        notice = "Schedule complete: HOMEpos and s1..s60 were attempted; S disabled"
+                     else:
+-                        pairs = recent.snapshot()
++                        # Keep frozen display for F debugging, but a frozen S is
++                        # recorded as FAILED and consumes its label (no silent shift).
++                        pairs = [] if frozen is not None else recent.snapshot()
+                         summary, records, good = assess_snapshot(pairs, time.monotonic())
+-                        label = active_label()
++                        if frozen is not None:
++                            summary["status"] = "failed"
++                            summary["failure_reason"] = "S pressed while display frozen; no live batch"
+                         try:
+                             path = save_batch(session, pairs, summary, records, good,
+                                               context, label, save_all_frames=save_all_frames)
+-                            notice = (f"Sampling complete: {summary['valid_frames']}/{WINDOW_SIZE} valid; "
+-                                      f"{summary['status'].upper()}; {path.parent.name}")
+-                            print(notice, "point", label, "->", path)
+-                            if summary["status"] == "success":
+-                                successful_batch_count += 1
+-                                # Do not use the same buffered captures again for the next point.
+-                                recent.clear()
+-                                latest = None
++                            notice = (f"Sampling complete: {label}: "
++                                      f"{summary['valid_frames']}/{WINDOW_SIZE} valid; "
++                                      f"{summary['status'].upper()}; next {active_label()}")
++                            print(notice, "->", path)
+                         except Exception as error:
+-                            notice = "Batch save failed: " + str(error)
++                            # Still advance. Never reuse s11 after a disk error.
++                            notice = (f"{label}: SAVE ERROR ({error}); "
++                                      f"next {active_label()} - verify disk / log")
+                             print(notice)
++                        finally:
++                            # A new RAPID point must never reuse an old point's RGB/depth.
++                            recent.clear()
++                            latest = None
+                 elif key == ord("f"):
+                     if displayed is None or (frozen is None and not is_fresh(displayed, time.monotonic())):
+                         notice = "F not saved: no fresh pair"
+@@ -445,9 +501,10 @@
+     parser = argparse.ArgumentParser(description=__doc__)
+     parser.add_argument("--target-id", type=int, choices=range(250), default=23, metavar="0..249")
+     parser.add_argument("--point-label", default=None,
+-                        help="Fixed batch label (for repeatedly measuring one point). Default auto labels s1,s2,...")
+-    parser.add_argument("--point-prefix", default="s", help="Auto point prefix, default s")
+-    parser.add_argument("--point-start", type=int, default=1, help="First point number, default 1")
++                        help="V2 custom fixed label for isolated tests; omit for HOMEpos,s1..s60")
++    parser.add_argument("--point-prefix", default="s", help="V2 custom point prefix; default s")
++    parser.add_argument("--point-start", type=int, default=0,
++                        help="Resume index: 0=HOMEpos (default), 1=s1, ..., 60=s60")
+     parser.add_argument("--save-all-frames", action="store_true",
+                         help="Additionally save RGB/Depth arrays for every buffered frame; requires extra disk space")
+     args = parser.parse_args()
