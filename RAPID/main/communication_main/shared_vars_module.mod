@@ -42,6 +42,7 @@ MODULE shared_vars_module
     CONST num flag_move_calibration_home := 11;
     CONST num flag_move_calibration_outofway := 12;
     
+    PERS bool grip_ok_left:= FALSE;
     
     ! ========== CALIBRATION ========== 
     CONST num calib_array_size := 40;

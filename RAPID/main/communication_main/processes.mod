@@ -195,6 +195,9 @@ MODULE processes
         VAR mug_vector buffer;
         VAR mug_vector hand_over_pose;
         
+        VAR num grasp_attempts :=0;  !test 1
+        VAR bool grasped := FALSE; 
+        
                 ! Ensure both arms are idle before we even ask Python for coordinates
         shared_movement_left.wait_flag := FALSE;
         shared_movement_right.wait_flag := FALSE;
@@ -225,24 +228,63 @@ MODULE processes
             shared_movement_left.hand_over_pose := hand_over_pose;
             shared_movement_right.hand_over_pose := hand_over_pose;
 
+            
+!*************************1 - 4 kommentera bort för test 1******************
             ! 1. START RIGHT ARM IMMEDIATELY
             ! It travels to the meeting point while Left is still picking.
-            shared_movement_right.flag := flag_hand_over;
-            shared_movement_right.wait_flag := TRUE;
+!            shared_movement_right.flag := flag_hand_over;
+!            shared_movement_right.wait_flag := TRUE;
             
             
 
             ! 2. START LEFT ARM PICK
-            shared_movement_left.mug := buffer; 
-            shared_movement_left.flag := flag_pick_up_mug;
-            shared_movement_left.wait_flag := TRUE;
+ !           shared_movement_left.mug := buffer; 
+ !           shared_movement_left.flag := flag_pick_up_mug;
+  !          shared_movement_left.wait_flag := TRUE;
 
             ! 3. Wait for Left arm to finish the table pick
-            WaitUntil shared_movement_left.wait_flag = FALSE;
+  !          WaitUntil shared_movement_left.wait_flag = FALSE;
 
             ! 4. Tell Left arm to move to meeting point
-            shared_movement_left.flag := flag_hand_over;
+  !          shared_movement_left.flag := flag_hand_over;
+  !          shared_movement_left.wait_flag := TRUE;
+!*******************************************************************************
+
+!test 1  =======================================================================
+        WHILE(grasped = FALSE) AND (grasp_attempts<5) DO
+            IF grasp_attempts > 0 THEN
+                WaitTime 0.5;
+                buffer:= GetRobVector();
+      
+            ENDIF
+            
+            grasp_attempts := grasp_attempts +1;
+            shared_movement_left.mug :=  buffer;
+            shared_movement_left.flag := flag_pick_up_mug;
             shared_movement_left.wait_flag := TRUE;
+            WaitUntil shared_movement_left.wait_flag = FALSE;
+            IF shared_movement_left.flag = flag_pick_up_mug THEN
+                grasped:=TRUE;
+            ENDIF
+        ENDWHILE
+        
+        IF grasped = FALSE THEN
+            TPWrite "failed. dont start handover";
+            moveToHomeTarget;
+            RETURN;
+        ENDIF
+        
+        shared_movement_right.flag := flag_hand_over;
+        shared_movement_right.wait_flag := TRUE;
+        
+        shared_movement_left.flag := flag_hand_over;
+        shared_movement_left.wait_flag := TRUE;
+        
+     
+!test 1  =======================================================================
+
+
+
 
             ! 5. Run the strict handshake timing
             HandOverSyncLogic;
@@ -301,6 +343,7 @@ MODULE processes
         
         ! 2. Update the shared variable so the Right Arm knows the target
         shared_movement_right.mug.position := next_free_slot;
+        
         
         ! 3. Trigger the Right Arm to execute LeaveMugUprightV2
         shared_movement_right.flag := flag_leave_mug;

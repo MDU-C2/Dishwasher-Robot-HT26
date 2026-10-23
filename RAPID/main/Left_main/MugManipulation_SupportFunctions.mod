@@ -119,7 +119,6 @@ MODULE MugManipulation_SupportFunctions
      TPWrite "normal dir:" \Orient:= [normal.x,normal.y,normal.z,normal.z];
             ! 1. Check if the mug is in the "Danger Zone" (e.g., X > 350)
             IF (RobName() = "ROB_L" AND position.x < xval AND position.y < yval AND (normal.z = 1 OR normal.z = -1)) THEN
-          !  IF (RobName() = "ROB_L" AND position.x <490) THEN
                 ! AREA A: Fingers point RIGHT (sideways logic)
                 u := [0, -1, 0]; 
                 TPWrite "dir left:" \Pos:=position;

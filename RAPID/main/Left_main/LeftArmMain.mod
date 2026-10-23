@@ -24,7 +24,7 @@ MODULE LeftArmMain
     CONST robtarget pSafeEntryOvanC := [[484.94, 110, 180],[0.03575, 0.72068,-0.69169,0.03029],[0,0,0,4],[-175,9E9,9E9,9E9,9E9,9E9]]; 
     VAR robtarget pSafeEntryOvanC2 := [[484.94, 110, 180],[0.03575, 0.72068,-0.69169,0.03029],[0,0,0,4],[-175,9E9,9E9,9E9,9E9,9E9]]; 
 
-
+    VAR clock cycleClock;  !time
    
     
     ! used for mug manipulation
@@ -32,26 +32,20 @@ MODULE LeftArmMain
     CONST pos sholder_pos_far := [1000,800,460];
     CONST robtarget cup_target := [[499.548,-110.253,-46.3938],[0.0565402,0.114235,0.990146,-0.0580089],[-2,-3,-1,4],[-177.807,9E+09,9E+09,9E+09,9E+09,9E+09]]; 
         
-    CONST speeddata movement_speed := v400;  !1000
+    CONST speeddata movement_speed := v1500;  !1000 !400
     CONST speeddata pick_speed := v50; !400
-    CONST speeddata transit_speed := v300; ! Optimization: for fast resets
+    CONST speeddata transit_speed := v1500; ! Optimization: for fast resets !300
     CONST num max_magnitude := 300;         
     
     ! SPEED OPTIMIZATION: Increased step_size for smoother, faster calculation
     CONST num step_size := 150;             
         
     ! used in basic movement
-  !  CONST num x_offset := -9;           
-  !  CONST num y_offset := -10;                
-  !  CONST num z_offset := -1;        
-    
-  !  CONST num x_offset := 20;           
-   ! CONST num y_offset := -8 ;                
-   ! CONST num z_offset := 5; 
+
     VAR num x_offset := 0;           
     VAR num y_offset := 0 ;                
     VAR num z_offset := 0; 
-    
+    VAR bool switch := False; 
     
     ! used when fetching a mug
     CONST num gripper_offset := 0;    
@@ -60,13 +54,13 @@ MODULE LeftArmMain
     
     PROC main()
         
-        !calib;
-        !WaitTime 20;
+      !  calib;
+     !   WaitTime 20;
         
 
         VAR mug_vector buffer; ! RESTORED
         
-        g_calibrate; 
+    !    g_calibrate; 
         TPErase;     
         
         ! Optimization: Config commands outside loop
@@ -117,8 +111,18 @@ MODULE LeftArmMain
                 MoveJ calib_target_outofway,transit_speed,z50,tGripper;
   
             CASE flag_pick_up_mug: 
-                FetchMug shared_movement_left.mug.position,pick_offset,shared_movement_left.mug.normal;  
+            
+                ! grip_ok_left = TRUE;
                 
+             !   IF (gripper_position >= 0.5) THEN
+              !      FetchMug shared_movement_left.mug.position,pick_offset,shared_movement_left.mug.normal;  
+            !    ENDIF
+             !   WHILE (gripper_position < 0.5 ) DO
+                !gripper_position := grip_max;
+               ! AND switch = FALSE
+                 FetchMug shared_movement_left.mug.position,pick_offset,shared_movement_left.mug.normal;  
+              !  ENDWHILE
+
             CASE flag_leave_mug: 
                  ! Optimization: Uses standard normal for safer release
                  LeaveMug shared_movement_left.mug.position,[0,0,1],pick_offset;

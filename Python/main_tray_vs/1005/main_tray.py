@@ -442,6 +442,7 @@ def run():
             q_det   = device.getOutputQueue(name="detections", maxSize=4, blocking=False)
 
 
+
             while True:
                 if SLOT_SOURCE == "camera":
                     _states, tray_img = tray_camera.get_free_slots()

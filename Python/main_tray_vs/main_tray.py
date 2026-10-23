@@ -5,8 +5,10 @@ import time
 from updated_communication import Communication
 import camera_setup as cs
 import test_protocol as tp
-import tray_camera as tc
+import tray_camera
 import threading
+import yumi_capture
+
 #==================================== THREADING SETUP ====================================
 global busy, times_sec, count
 busy = False
@@ -94,45 +96,9 @@ def robot_xyz_from_relations(x, y, z, homogeneous):
 # Right-arm place target after handover.
 # "fixed"  — one robot-frame point, computer camera stays closed.
 # "camera" — tray_camera scans the rack and returns a free slot.
-SLOT_SOURCE = "fixed"
+SLOT_SOURCE = "camera"
 FIXED_SLOT_NAME = "slot_1"
 FIXED_SLOT_COORDS = [302.0, -508, 248.0]  # mm, robot frame; same fixed slot as 1005
-
-_nxt = None
-
-
-def init_slot():
-    """Initialize next free slot."""
-    global _nxt
-    _nxt = _nxt or tc.reserve()
-    return _nxt or (None, None)
-
-
-def setup():
-    """Calibrate or load, initialize."""
-    saved = bool(tc.boxes())
-    if not saved:
-        print("[TRAY] No saved calibration.")
-    if not saved or input("\nCalibrate slots? (y/n): ").strip().lower() == "y":
-        if not tc.calibrate() and not saved:
-            return False
-    tc.check()
-    if init_slot()[0] is None:
-        print("[TRAY] No free slot. Empty the tray or calibrate again.")
-        return False
-    return True
-
-
-def end_slot():
-    """Clear slot, prepare next."""
-    global _nxt
-    if SLOT_SOURCE != "camera":
-        return
-    if _nxt:
-        tc.drop(_nxt[0])
-        _nxt = None
-    init_slot()
-
 
 def select_placement_slot():
     """Return (slot_name, [x, y, z]) for the right arm, or (None, None)."""
@@ -142,10 +108,19 @@ def select_placement_slot():
             print(f"[TRAY] Source=fixed  slot '{FIXED_SLOT_NAME}' @ {coords}")
             return FIXED_SLOT_NAME, coords
         case "camera":
-            chosen, coords = init_slot()
-            if chosen is not None:
-                print(f"[TRAY] Source=camera  slot '{chosen}' @ {coords}")
-            return chosen, coords
+            # rescan=True: fresh, frame-averaged look at the tray right now (the display loop reuses a 1 s old scan)
+            states, _frame = tray_camera.get_free_slots(rescan=True)
+            print(f"[TRAY] Source=camera  states: {states}")
+            chosen = next(
+                (name for name, state in states.items() if state == "free"),
+                None,
+            )
+            if chosen is None:
+                print("[TRAY] No free dishwasher slot.")
+                return None, None
+            coords = tray_camera.get_robot_coords_for_slot(chosen)
+            print(f"[TRAY] Source=camera  slot '{chosen}' @ {coords}")
+            return chosen, list(coords)
         case _:
             print(f"[TRAY] ERROR: unknown SLOT_SOURCE '{SLOT_SOURCE}'.")
             return None, None
@@ -158,7 +133,7 @@ def confirm_placement(slot_name):
             print(f"[TRAY] Source=fixed  placement check skipped for '{slot_name}'.")
             return None
         case "camera":
-            return tc.verify(slot_name)
+            return tray_camera.verify_placement(slot_name)
         case _:
             print(f"[TRAY] ERROR: unknown SLOT_SOURCE '{SLOT_SOURCE}'.")
             return None
@@ -376,8 +351,6 @@ def local_move(orient, client, target_xyz, normalized_vector, save_protocol, fil
 
         finally:
 
-            end_slot()
-
             busy = False
 
 def choose_detection_model():
@@ -427,11 +400,14 @@ def run():
 
     client.get_free_slot_logic = find_empty_slot_in_dishwasher
 
-    if SLOT_SOURCE == "camera" and not setup():
-        tc.close()
-        return
-
     if client.connectV2():
+
+        if SLOT_SOURCE == "camera":
+            try:
+                tray_camera.load_calibrated_positions("slot_positions.json")
+            except Exception as exc:
+                print(f"[TRAY] WARNING: could not load slot_positions.json: {exc}. "
+                      "Slot lookup will fail until it is fixed.")
 
         homogeneous, syncNN, pipeline, labels, rotation_matrix, translation_vector, camera_points, robot_points = cs.camera_setup(cam_coords, robot_file, model_choice)
 
@@ -580,10 +556,11 @@ def run():
             q_depth = device.getOutputQueue(name="depth", maxSize=4, blocking=False)
             q_det   = device.getOutputQueue(name="detections", maxSize=4, blocking=False)
 
+            cv.namedWindow('RGB', cv.WINDOW_NORMAL)
 
             while True:
                 if SLOT_SOURCE == "camera":
-                    tray_img = tc.view()
+                    _states, tray_img = tray_camera.get_free_slots()
                     if tray_img is not None:
                         cv.imshow("Tray Status (2D)", tray_img)
                 in_rgb   = q_rgb.get() # latest RGB frame
@@ -660,6 +637,9 @@ def run():
                         robot_xyz = robot_xyz_from_relations(
                             coords.x, coords.y, coords.z, homogeneous,
                         )
+                        if det is selected_target:
+                            with client._mutex_variable:
+                                client.MugCoordinates = robot_xyz
                         cv.putText(frame, f'R: {robot_xyz[0]:.1f}, {robot_xyz[1]:.1f}, {robot_xyz[2]:.1f}', (x1+5, y1+80), cv.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 1)
                         if det is selected_target and grasp_samples:
                             median_xyz = median_grasp_xyz(grasp_samples)
@@ -690,6 +670,7 @@ def run():
                     2,
                 )
                 cv.imshow('RGB', frame)
+                yumi_capture.handle(frame)
                 key = cv.waitKey(1) & 0xFF
                 # ==========================================
                 # AUTOMATIC PICK-AND-PLACE
@@ -747,7 +728,7 @@ def run():
                     break
 
         cv.destroyAllWindows()
-        tc.close()
+        tray_camera.release_camera()
 
         if save_protocol:
             tp.ask_user(file_path, "end")

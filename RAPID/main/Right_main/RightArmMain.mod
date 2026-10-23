@@ -5,7 +5,7 @@ MODULE RightArmMain
     
 !     Description:  Main module for arm movement which works together with the communication module.
     
-!     Author: fjn20007 
+!     Author: 
     
 !    ***********************************************************
 
@@ -24,17 +24,21 @@ MODULE RightArmMain
     CONST pos sholder_pos_far := [200,-400,460];
     CONST robtarget cup_target := [[499.548,-110.253,-46.3938],[0.0565402,0.114235,0.990146,-0.0580089],[-2,-3,-1,4],[-177.807,9E+09,9E+09,9E+09,9E+09,9E+09]]; ! start value
         
-    CONST speeddata movement_speed := v200; ! Movement speed for robot movement fart
+    CONST speeddata movement_speed := v800; ! Movement speed for robot movement fart
     CONST speeddata transit_speed := v1500; ! in between positions 
     CONST speeddata pick_speed := v400; ! v400
     CONST num max_magnitude := 300;         ! Threshold for when to discretize robtarget (used in MovementProc)
     CONST num step_size := 150;             ! Step size when discretizing robtargets (used in MovementProc)
         
         ! used in basic movement
-    CONST num x_offset := 10;                
-    CONST num y_offset := -10;               
-    CONST num z_offset := 0;    
+  !  CONST num x_offset := 10;                   !kommenterade bort 10-22
+ !   CONST num y_offset := -10;               
+  !  CONST num z_offset := 0;    
     
+    CONST num x_offset := 0;
+    CONST num y_offset := 0;
+    CONST num z_offset := 0;
+  
         ! used when fetching a mug
     CONST num gripper_offset := 0;    
     CONST num pick_offset := 100;
@@ -114,7 +118,7 @@ MODULE RightArmMain
                            ! LeaveMugUpright shared_movement_right.mug.position, 100;
                             
                             ! Use the position that the Sequencer just received from Python
-                            LeaveMugUprightV2 shared_movement_right.mug.position, 100;
+                            LeaveMugUprightV3 shared_movement_right.mug.position, 100;
                 
             CASE flag_hand_over: ! hand over sequence
                 

@@ -1,645 +1,81 @@
-"""import os
-import sys
-os.environ.setdefault("OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS", "0")  # must be set before importing cv2
-import json
-import math
-import time
-import threading
-import cv2 as cv
-import numpy as np
-
-USE_CAM = True
-CAM_IDX = 0                      # index of the 2D tray camera (run find_cameras.py if unsure)
-CAM_FALLBACK_INDICES: list[int] = []   # other indices to try if CAM_IDX fails (empty = don't guess)
-
-# ---- detection tuning -------------------------------------------------------
-DIFF_PIXEL_THRESH = 25     # per-pixel gray-level difference that counts as "changed"
-OCCUPIED_FRACTION = 0.12   # fraction of changed pixels in a slot ROI => occupied
-BLUR_KSIZE = (7, 7)        # blur before comparing, suppresses sensor noise
-
-# ==================================================================================
-#  HARD-CODED ROBOT COORDINATES FOR EACH SLOT  (edit this list)
-#
-#  Jog the arm to where the cup should be RELEASED in each slot, read X, Y, Z from
-#  the FlexPendant (same work object / tool the RAPID program uses, in mm) and
-#  write them here.
-#
-#  "slot_N" must be the N-th box you click during 2D calibration. The camera only
-#  decides whether each slot is free or occupied; these numbers are what get sent
-#  to RAPID. Slots without an entry here are never chosen.
-# ==================================================================================
-SLOT_ROBOT_COORDS: dict[str, list[float]] = {
-    # "slot_1": [X, Y, Z],
-    # "slot_2": [X, Y, Z],
-}
-# If this dict is empty, the coordinates in slot_positions.json are used instead.
-
-POS: dict[str, list[float]] = {name: list(c) for name, c in SLOT_ROBOT_COORDS.items()}
-_cap = None                         # persistent VideoCapture
-_ref_img = None                     # reference image (empty tray)
-_slot_states: dict[str, str] = {}   # slot_name -> "free" | "occupied"  (in-memory)
-_last_frame = None                  # last captured frame - reused for display (no re-grab)
-_reserved: set[str] = set()         # slots the robot was sent to (occupied until mark_slot_free)
-_camera_states: dict[str, str] = {} # what the camera alone saw on the last scan
-_camera_lock = threading.RLock()    # main loop and robot thread both use the camera
-
-
-def set_camera_index(idx: int) -> None:
-    global CAM_IDX, _cap
-    CAM_IDX = idx
-    if _cap is not None:
-        _cap.release()
-        _cap = None
-    print(f"[TRAY] Camera index set to {CAM_IDX}.")
-
-
-def file_path(p: str) -> str:
-
-    if os.path.exists(p):
-        return p
-    d = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(d, p)
-
-
-def _check_positions(coords: dict) -> None:
-
-    for name, c in coords.items():
-        if not (isinstance(c, (list, tuple)) and len(c) == 3
-                and all(isinstance(v, (int, float)) for v in c)):
-            raise ValueError(f"Slot '{name}' must be [X, Y, Z] numbers, got {c!r}")
-
-    cfg_path = file_path("slot_config.json")
-    if os.path.exists(cfg_path):
-        cam_slots = set(load_cfg("slot_config.json").keys())
-        no_coords = sorted(cam_slots - set(coords))
-        no_camera = sorted(set(coords) - cam_slots)
-        if no_coords:
-            print(f"[TRAY WARNING] Camera slots without robot coordinates (never used): {no_coords}")
-        if no_camera:
-            print(f"[TRAY WARNING] Robot coordinates without a camera slot (never used): {no_camera}")
-
-
-def load_calibrated_positions(path: str = "slot_positions.json") -> None:
-  
-    global POS
-    if SLOT_ROBOT_COORDS:
-        POS = {name: list(c) for name, c in SLOT_ROBOT_COORDS.items()}
-        source = "hard-coded SLOT_ROBOT_COORDS"
-    else:
-        p = file_path(path)
-        if not os.path.exists(p):
-            print(f"[TRAY ERROR] SLOT_ROBOT_COORDS is empty and '{p}' not found - no robot coordinates.")
-            POS = {}
-            return
-        with open(p, "r") as f:
-            POS = json.load(f)
-        source = f"'{p}'"
-    _check_positions(POS)
-    print(f"[TRAY] Using {len(POS)} slot coordinate(s) from {source}: {sorted(POS)}")
-
-
-def _sync_positions(cfg: dict, pos_path: str = "slot_positions.json") -> None:
-
-    load_calibrated_positions(pos_path)
-
-
-def load_cfg(p: str = "slot_config.json") -> dict:
-    path = file_path(p)
-    if not os.path.exists(path):
-        print(f"[TRAY ERROR] Config file not found: {path}")
-        return {}
-    with open(path, "r") as f:
-        return json.load(f)
-
-
-def _backend_candidates() -> list:
-    
-    if sys.platform.startswith("win"):
-        return [cv.CAP_DSHOW, cv.CAP_MSMF]
-    if sys.platform == "darwin":
-        return [cv.CAP_AVFOUNDATION, cv.CAP_ANY]
-    return [cv.CAP_ANY]
-
-
-def _open_camera():
-
-    indices = [CAM_IDX] + [i for i in CAM_FALLBACK_INDICES if i != CAM_IDX]
-    for idx in indices:
-        for backend in _backend_candidates():
-            t0 = time.time()
-            print(f"[TRAY] Opening camera index={idx} backend={backend} ...")
-            cap = cv.VideoCapture(idx, backend)
-            if not cap.isOpened():
-                cap.release()
-                continue
-            if sys.platform != "darwin":
-                cap.set(cv.CAP_PROP_FOURCC, cv.VideoWriter_fourcc(*"MJPG"))  # less USB bandwidth
-            cap.set(cv.CAP_PROP_FRAME_WIDTH, 1280)
-            cap.set(cv.CAP_PROP_FRAME_HEIGHT, 720)
-            cap.set(cv.CAP_PROP_BUFFERSIZE, 1)
-            for _ in range(15):
-                ret, frame = cap.read()
-                if ret and frame is not None:
-                    h, w = frame.shape[:2]
-                    print(f"[TRAY] Camera opened: index={idx} backend={backend} "
-                          f"{w}x{h} in {time.time() - t0:.1f}s")
-                    return cap
-                time.sleep(0.1)
-            cap.release()
-    return None
-
-
-def get_live_frame():
-    with _camera_lock:
-        return _get_live_frame_unlocked()
-
-
-def _get_live_frame_unlocked():
-    global _cap, _last_frame
-    if not USE_CAM:
-        img = cv.imread(file_path("test_images/current_state.jpg"))
-        _last_frame = img
-        return img
-
-    # Re-open only when needed
-    if _cap is None or not _cap.isOpened():
-        cap = _open_camera()
-        if cap is None:
-            print(f"[TRAY ERROR] Could not open the 2D camera at index {CAM_IDX}. "
-                  f"Run find_cameras.py to find the right index and set CAM_IDX.")
-            return None
-        _cap = cap
-
-        # Flush warmup frames
-        for _ in range(3):
-            _cap.grab()
-        time.sleep(0.2)
-
-    ret, frame = _cap.read()
-    if not ret or frame is None:
-        print("[TRAY ERROR] Failed to grab frame from 2D camera.")
-        return None
-    _last_frame = frame
-    return frame
-
-
-def grab_settled_frame(n_warmup: int = 30, n_avg: int = 5):
-    with _camera_lock:
-        return _grab_settled_frame_unlocked(n_warmup, n_avg)
-
-
-def _grab_settled_frame_unlocked(n_warmup: int, n_avg: int):
-   
-    global _last_frame
-    first = get_live_frame()          # makes sure the camera is open
-    if first is None:
-        return None
-    if not USE_CAM:
-        return first
-
-    for _ in range(n_warmup):
-        _cap.read()
-        time.sleep(0.03)
-
-    frames = []
-    for _ in range(n_avg):
-        ret, f = _cap.read()
-        if ret and f is not None:
-            frames.append(f.astype(np.float32))
-    if not frames:
-        return None
-
-    avg = np.mean(frames, axis=0).astype(np.uint8)
-    _last_frame = avg
-    return avg
-
-
-def release_camera() -> None:
-    global _cap
-    stop_background_scan()
-    if _cap is not None:
-        _cap.release()
-        _cap = None
-        print("[TRAY] 2D camera released.")
-
-
-def reset_slot_states() -> None:
-
-    _slot_states.clear()
-    _reserved.clear()
-    _camera_states.clear()
-    print("[TRAY] Slot states reset.")
-
-
-def _slot_metric(roi_ref, roi_cur) -> tuple[float, float]:
-   
-    ref = cv.GaussianBlur(cv.cvtColor(roi_ref, cv.COLOR_BGR2GRAY), BLUR_KSIZE, 0).astype(np.float32)
-    cur = cv.GaussianBlur(cv.cvtColor(roi_cur, cv.COLOR_BGR2GRAY), BLUR_KSIZE, 0).astype(np.float32)
-    diff = np.abs((cur - cur.mean()) - (ref - ref.mean()))
-    return float(diff.mean()), float(np.mean(diff > DIFF_PIXEL_THRESH))
-
-
-# click 2 points per slot
-def calibrate_slots(image=None,
-                    config_out: str = "slot_config.json",
-                    ref_out: str = "test_images/empty_tray.jpg") -> dict:
-    global _ref_img
-
-    if image is None:
-        print("[TRAY] Grabbing calibration frame from camera (letting exposure settle)...")
-        image = grab_settled_frame()
-        if image is None:
-            print("[TRAY ERROR] Cannot calibrate: no image available.")
-            return {}
-
-    state = {
-        "clicks": [],   # raw (x,y) click points collected
-        "boxes": [],    # completed [x1,y1,x2,y2] boxes
-        "img": image.copy(),
-    }
-
-    COLOUR_PENDING = (0, 200, 255)
-    COLOUR_DONE = (0, 220, 60)
-    COLOUR_LABEL = (255, 255, 255)
-
-    def _redraw(s):
-        canvas = image.copy()
-        for idx, box in enumerate(s["boxes"]):
-            x1, y1, x2, y2 = box
-            cv.rectangle(canvas, (x1, y1), (x2, y2), COLOUR_DONE, 2)
-            cv.putText(canvas, f"slot_{idx + 1}", (x1, y1 - 6),
-                       cv.FONT_HERSHEY_SIMPLEX, 0.55, COLOUR_LABEL, 1)
-        if len(s["clicks"]) == 1:
-            cx, cy = s["clicks"][0]
-            cv.circle(canvas, (cx, cy), 5, COLOUR_PENDING, -1)
-            cv.putText(canvas, "click 2nd corner", (cx + 8, cy),
-                       cv.FONT_HERSHEY_SIMPLEX, 0.5, COLOUR_PENDING, 1)
-        s["img"] = canvas
-
-    def _on_mouse(event, x, y, flags, param):
-        s = param
-        if event == cv.EVENT_LBUTTONDOWN:
-            s["clicks"].append((x, y))
-            if len(s["clicks"]) == 2:
-                (x1, y1), (x2, y2) = s["clicks"]
-                box = [min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2)]
-                s["boxes"].append(box)
-                s["clicks"].clear()
-                print(f"  [CALIB] slot_{len(s['boxes'])} -> {box}")
-            _redraw(s)
-
-    WIN = "Tray Calibration  |  click top-left then bottom-right per slot  |  u=undo  q=done"
-    cv.namedWindow(WIN, cv.WINDOW_NORMAL)
-    cv.setMouseCallback(WIN, _on_mouse, state)
-    _redraw(state)
-
-    print("[TRAY] Calibration window open.")
-    print("       Click TOP-LEFT then BOTTOM-RIGHT for each slot.")
-    print("       Press 'u' to undo last slot, 'q' when finished.")
-
-    while True:
-        cv.imshow(WIN, state["img"])
-        key = cv.waitKey(20) & 0xFF
-        if key == ord('q') or cv.getWindowProperty(WIN, cv.WND_PROP_VISIBLE) < 1:
-            break
-        if key == ord('u'):
-            if state["boxes"]:
-                removed = state["boxes"].pop()
-                print(f"  [CALIB] Removed slot_{len(state['boxes']) + 1} -> {removed}")
-                state["clicks"].clear()
-                _redraw(state)
-
-    cv.destroyWindow(WIN)
-    cv.waitKey(1)
-
-    if not state["boxes"]:
-        print("[TRAY] No slots defined - calibration cancelled.")
-        return {}
-
-    cfg = {f"slot_{i + 1}": box for i, box in enumerate(state["boxes"])}
-
-    cfg_path = file_path(config_out)
-    os.makedirs(os.path.dirname(cfg_path) or ".", exist_ok=True)
-    with open(cfg_path, "w") as f:
-        json.dump(cfg, f, indent=4)
-    print(f"[TRAY] Saved {len(cfg)} slots to '{cfg_path}'.")
-
-    # Reference image: a fresh, settled frame taken AFTER clicking.
-    # Tray must be empty and hands out of view.
-    print("[TRAY] Capturing reference image - keep tray empty and hands out of view...")
-    time.sleep(1.0)
-    ref_frame = grab_settled_frame()
-    if ref_frame is None:
-        ref_frame = image
-    ref_path = file_path(ref_out)
-    os.makedirs(os.path.dirname(ref_path) or ".", exist_ok=True)
-    if not cv.imwrite(ref_path, ref_frame):
-        print(f"[TRAY ERROR] Could not write reference image to '{ref_path}'.")
-    else:
-        print(f"[TRAY] Reference image saved to '{ref_path}'.")
-
-    _ref_img = ref_frame.copy()
-    _slot_states.clear()          # old states belong to the old calibration
-    _reserved.clear()
-    _camera_states.clear()
-
-    _sync_positions(cfg)
-    return cfg
-
-
-# detect slots
-def _scan_camera(thresh: float = OCCUPIED_FRACTION, quiet: bool = False) -> tuple[dict, object]:
-   
-    global _ref_img
-
-    if _ref_img is None:
-        rf_path = file_path("test_images/empty_tray.jpg")
-        _ref_img = cv.imread(rf_path)
-        if _ref_img is None:
-            print(f"[TRAY ERROR] Reference image missing: {rf_path}")
-            return {}, None
-
-    current_frame = grab_settled_frame(n_warmup=3, n_avg=3)
-    if current_frame is None:
-        return {}, None
-
-    if current_frame.shape != _ref_img.shape:
-        print(f"[TRAY ERROR] Frame size {current_frame.shape} != reference {_ref_img.shape}. "
-              f"Recalibrate.")
-        return {}, None
-
-    cfg = load_cfg("slot_config.json")
-    results: dict[str, str] = {}
-    display_frame = current_frame.copy()
-
-    for name, box in cfg.items():
-        try:
-            x1, y1, x2, y2 = box
-            roi_ref = _ref_img[y1:y2, x1:x2]
-            roi_cur = current_frame[y1:y2, x1:x2]
-
-            if roi_ref.size == 0 or roi_ref.shape != roi_cur.shape:
-                results[name] = "unknown"
-                continue
-
-            mean_diff, frac = _slot_metric(roi_ref, roi_cur)
-            cam_status = "free" if frac < thresh else "occupied"
-            _camera_states[name] = cam_status
-
-            # occupied if the camera sees something OR the robot was already sent there
-            reserved = name in _reserved
-            status = "occupied" if (reserved or cam_status == "occupied") else "free"
-            results[name] = status
-
-            if not quiet:
-                print(f"  [SCAN] {name}: mean_diff={mean_diff:.1f}  changed={frac:.2%}  "
-                      f"thresh={thresh:.0%}  -> {status}{' (reserved)' if reserved else ''}")
-
-            color = (0, 255, 0) if status == "free" else (0, 0, 255)
-            cv.rectangle(display_frame, (x1, y1), (x2, y2), color, 2)
-            cv.putText(display_frame, f"{name}: {status} ({frac:.0%})", (x1, y1 - 10),
-                       cv.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
-        except Exception as e:
-            print(f"[TRAY ERROR] Processing {name}: {e}")
-
-    return results, display_frame
-
-
-def _annotate_from_state(states: dict) -> object:
-    if _last_frame is None:
-        return None
-    frame = _last_frame.copy()
-    cfg = load_cfg("slot_config.json")
-    for name, box in cfg.items():
-        try:
-            x1, y1, x2, y2 = box
-            status = states.get(name, "unknown")
-            color = (0, 255, 0) if status == "free" else (0, 0, 255)
-            cv.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-            cv.putText(frame, f"{name}: {status}", (x1, y1 - 10),
-                       cv.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
-        except Exception as e:
-            print(f"[TRAY ERROR] Annotating {name}: {e}")
-    return frame
-
-
-def get_free_slots(rescan: bool = False, thresh: float = OCCUPIED_FRACTION,
-                   quiet: bool = False) -> tuple[dict, object]:
-    global _slot_states
-
-    if rescan or not _slot_states:
-        with _camera_lock:
-            states, frame = _scan_camera(thresh, quiet)
-            _slot_states.update(states)
-            return dict(_slot_states), frame
-
-    # Fast path: just annotate current frame with known state
-    frame = _annotate_from_state(_slot_states)
-    return dict(_slot_states), frame
-
-
-def get_closest_free_slot(robot_xy: list[float] | None = None) -> tuple[str | None, list[float] | None]:
-    global _slot_states
-
-    with _camera_lock:     # scan + choose + reserve as one step
-        # Always rescan camera live when coordinates are requested
-        get_free_slots(rescan=True)
-
-        free = {name: POS[name] for name, state in _slot_states.items()
-                if state == "free" and name in POS}
-
-        if not free:
-            print("[TRAY] No free slots available.")
-            return None, None
-
-        if robot_xy is None or len(robot_xy) < 2:
-            chosen = next(iter(free))
-        else:
-            rx, ry = robot_xy[0], robot_xy[1]
-            chosen = min(free, key=lambda n: math.hypot(free[n][0] - rx, free[n][1] - ry))
-
-        coords = list(POS[chosen])
-
-        # mark occupied every time we send coordinates to the robot
-        _slot_states[chosen] = "occupied"
-        _reserved.add(chosen)
-        print(f"[TRAY] Slot '{chosen}' selected @ {coords}  ->  marked occupied.")
-
-        return chosen, coords
-
-
-
-
-def get_robot_coords_for_slot(name: str) -> list[float]:
-    if name not in POS:
-        raise KeyError(f"Slot '{name}' not found in calibrated positions.")
-    return list(POS[name])
-
-
-def mark_slot_free(name: str) -> None:
-    global _slot_states
-    _slot_states[name] = "free"
-    _reserved.discard(name)
-    print(f"[TRAY] Slot '{name}' marked free.")
-
-
-def release_reservation(name: str) -> None:
-  
-    with _camera_lock:
-        _reserved.discard(name)
-        cam = _camera_states.get(name)
-        if cam is not None:
-            _slot_states[name] = cam
-
-
-def verify_placement(name: str, thresh: float = OCCUPIED_FRACTION) -> bool:
-   
-    get_free_slots(rescan=True, thresh=thresh)
-    cam_status = _camera_states.get(name)
-    _reserved.discard(name)                      # reservation ends at the detection image
-    if cam_status is not None:
-        _slot_states[name] = cam_status
-    return cam_status == "occupied"
-
-
-# ---- background scanning: keeps the tray view fresh without ever blocking the main loop ----
-_view_lock = threading.Lock()
-_view_img = None
-_bg_thread = None
-_bg_stop = threading.Event()
-
-
-def _bg_loop(period: float) -> None:
-    global _view_img
-    while not _bg_stop.is_set():
-        try:
-            _, frame = get_free_slots(rescan=True, quiet=True)
-            if frame is not None:
-                with _view_lock:
-                    _view_img = frame
-        except Exception as e:
-            print(f"[TRAY ERROR] background scan: {e}")
-        _bg_stop.wait(period)
-
-
-def start_background_scan(period: float = 1.0) -> None:
-    #Start scanning the tray in a background thread (opening the camera there too)
-    global _bg_thread
-    if _bg_thread is not None and _bg_thread.is_alive():
-        return
-    _bg_stop.clear()
-    _bg_thread = threading.Thread(target=_bg_loop, args=(period,), daemon=True)
-    _bg_thread.start()
-    print(f"[TRAY] Background tray scan started (every {period:.1f}s).")
-
-
-def stop_background_scan() -> None:
-    _bg_stop.set()
-    if _bg_thread is not None:
-        _bg_thread.join(timeout=3)
-
-
-def get_cached_view() -> tuple[dict, object]:
-
-    with _view_lock:
-        img = None if _view_img is None else _view_img.copy()
-    return dict(_slot_states), img
-
-
-if __name__ == "__main__":
-    print("=" * 60)
-    print("  TRAY CAMERA - standalone test")
-    print("=" * 60)
-
-    load_calibrated_positions()
-
-    answer = input("\nRun interactive slot calibration? (y/n): ").strip().lower()
-    if answer == "y":
-        calibrate_slots()
-        print("\n[TEST] Calibration complete.  Reference image saved (empty tray).")
-    else:
-        print("[TEST] Skipping calibration - using existing slot_config.json.")
-
-    print("\n[TEST] Taking one snapshot to detect slot states...")
-    slots, img = get_free_slots(rescan=True)
-    print(f"[TEST] Detected states: {slots}")
-
-    if img is not None:
-        WIN = "Slot Detection Result  |  any key to continue"
-        cv.namedWindow(WIN, cv.WINDOW_NORMAL)
-        cv.imshow(WIN, img)
-        print("[TEST] Showing detected slots - press any key to continue.")
-        cv.waitKey(0)
-        cv.destroyWindow(WIN)
-
-    print("\n[TEST] Sending all free slots to robot - one by one ...\n")
-    pick_count = 0
-    robot_xy = [300.0, -120.0]
-
-    while True:
-        slot_name, coords = get_closest_free_slot(robot_xy)
-
-        if slot_name is None:
-            print("[TEST] No more free slots - tray is full.")
-            break
-
-        pick_count += 1
-        print(f"[TEST] Pick #{pick_count}")
-        print(f"[TEST]   -> Chosen slot : {slot_name}")
-        print(f"[TEST]   -> Coords sent : {coords}")
-        print(f"[TEST]   -> States now  : {_slot_states}")
-
-        robot_xy = coords[:2]
-
-        states, annotated = get_free_slots(rescan=False)
-        if annotated is not None:
-            free_count = sum(1 for s in states.values() if s == "free")
-            win_title = (
-                f"After pick #{pick_count}: {slot_name}  |  "
-                f"{free_count} slot(s) remaining  |  any key to continue"
-            )
-            cv.namedWindow(win_title, cv.WINDOW_NORMAL)
-            cv.imshow(win_title, annotated)
-            print(f"[TEST]   -> {free_count} slot(s) remaining - press any key to continue.\n")
-            cv.waitKey(0)
-            cv.destroyWindow(win_title)
-
-    cv.destroyAllWindows()
-    release_camera()
-    print(f"\n[TEST] Done - {pick_count} slot(s) dispatched.")"""
-
-
+"""
+tray_camera.py - 2D tray camera: which dishwasher slots are free, and where the robot should place a mug.
+
+Detection: both pictures are turned into blurred grayscale and each is shifted to zero mean brightness, so a change in
+room lighting does not look like a mug. A slot is OCCUPIED when more than FRAC of its pixels still differ by PIX.
+A background thread keeps only the newest camera frame, so old frames can never pile up.
+
+Two calling styles are supported (use either):
+
+  Style A - main_tray.py / main_trayOriginal.py (current):
+      load_calibrated_positions("slot_positions.json")
+      get_free_slots()                 -> (states, annotated_image)  states = {"slot_1": "free" | "occupied" | "unknown"}
+      get_robot_coords_for_slot(name)  -> [x, y, z]
+      verify_placement(name)           -> True / False (keep checking) / None (gave up)
+      release_camera()
+
+  Style B - original main_tray.py with setup():
+      boxes()  check()  calibrate()  reserve() -> (slot, [x, y, z]) | None
+      verify(slot)  drop(slot)  view() -> new image | None  close()
+
+Run `python tray_camera.py` to calibrate or to watch the live view.
+
+Robot coordinates of a slot: if slot_transform.json exists (see below) they are computed from the MIDDLE of the slot's
+pixel box in slot_config.json, so moving or redrawing a box moves the target. Otherwise they come from
+slot_positions.json (or COORDS). Create the camera -> robot mapping once with
+    python tray_camera.py --calibrate-transform   click 4+ points on the tray, type each point's robot X Y Z (pendant)
+    python tray_camera.py --fit-from-slots        or: fit it from slots whose robot x, y, z you already measured
+Redo it if the 2D camera or the robot base is ever moved.
+
+Files (next to this script): slot_config.json (pixel boxes), test_images/empty_tray.jpg (empty-tray reference),
+slot_positions.json (robot x, y, z per slot), slot_transform.json (camera -> robot mapping).
+"""
 import os
 import sys
-os.environ.setdefault("OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS", "0")
+os.environ.setdefault("OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS", "0")   # before cv2 is imported: fast webcam start on Windows
 import json
+import re
 import time
 import threading
+
 import cv2 as cv
 import numpy as np
 
-CAM = 1
-PIX = 25
-FRAC = 0.12
+# ===========================================================
+# CONFIGURATION
+# ===========================================================
+USE_CAM = True              # False = read test_images/current_state.jpg instead of a camera (for testing)
+CAM = 1                     # camera index of the tray camera (1 = USB / DroidCam / Iriun on Windows)
+PIX = 25                    # a pixel "differs" when its brightness-normalised difference is above this (0-255)
+FRAC = 0.06                 # slot is OCCUPIED when more than this fraction of its pixels differ
 BLUR = (7, 7)
-AGE = 3.0
+AGE = 3.0                   # reserve() rescans when its last scan is older than this (seconds)
+TRIES = 10                  # verify() gives up after this many "not seen" answers in a row
+LIVE_AGE = 1.0              # get_free_slots() reuses the last scan if it is younger than this (seconds)
+FRAME_MAX_AGE = 1.0         # a camera frame older than this counts as "no frame" (frozen / unplugged camera)
+OPEN_RETRY_SECONDS = 5.0    # after a failed camera open, wait this long before trying again
 DIR = os.path.dirname(os.path.abspath(__file__))
 CFG = os.path.join(DIR, "slot_config.json")
 REF = os.path.join(DIR, "test_images", "empty_tray.jpg")
 
+#Change before running (optional: slot_positions.json is used too and wins over these)
 COORDS = {
-    "slot_1": [350.0, -150.0, 45.0],
-    "slot_2": [350.0, -250.0, 45.0],
-    "slot_3": [350.0, -350.0, 45.0],
-    "slot_4": [420.0, -150.0, 45.0],
-    "slot_5": [420.0, -250.0, 45.0],
-    "slot_6": [420.0, -350.0, 45.0],
-    "slot_7": [480.0, -150.0, 45.0],
-    "slot_8": [480.0, -250.0, 45.0],
-    "slot_9": [480.0, -350.0, 45.0],
-    "slot_10": [510.0, -150.0, 45.0],
+ #   "slot_1": [335.0, -402.0, 160.0],
+ #  "slot_2": [441.0, -402.0, 160.0],
+ #  "slot_3": [506.0, -166.0, 170.0],
 }
 
+# Robot coordinates of a slot:
+#   "auto" = from the middle of the slot's pixel box via slot_transform.json when that file exists, else slot_positions.json
+#   "json" = always slot_positions.json / COORDS (the older behaviour)
+COORD_SOURCE = "auto"
+SLOT_Z = None                # optional fixed release height in mm; overrides the z stored in slot_transform.json
+TRANSFORM = os.path.join(DIR, "slot_transform.json")
+_tf = None
+_tf_tried = False
+
+POS: dict[str, list[float]] = {}     # robot coordinates loaded from slot_positions.json
+_pos_tried = False
 _cap = None
 _ref = None
 _frame = None
@@ -649,7 +85,89 @@ _when = 0.0
 _boxes = None
 _res = set()
 _seen = {}
+_miss = {}
 _lock = threading.RLock()
+
+# --- background capture thread state ---
+_cap_thread = None
+_cap_running = False
+_cap_lost = False
+_latest_frame = None
+_latest_time = 0.0
+_frame_lock = threading.Lock()
+_next_open_try = 0.0
+_last_warn: dict[str, float] = {}
+
+
+def _warn(key, msg, every=10.0):
+    """Print at most once per `every` seconds (the display loop calls in here many times per second)."""
+    now = time.time()
+    if now - _last_warn.get(key, 0.0) >= every:
+        _last_warn[key] = now
+        print(msg)
+
+
+# ===========================================================
+# FILES AND ROBOT COORDINATES
+# ===========================================================
+def file_path(p: str) -> str:
+    if os.path.exists(p):
+        return p
+    d = os.path.dirname(os.path.abspath(__file__))
+    a1 = os.path.join(d, p)
+    if os.path.exists(a1):
+        return a1
+    a2 = os.path.join(d, "..", "..", p)
+    if os.path.exists(a2):
+        return a2
+    return p
+
+
+def set_slot_positions(positions: dict[str, list[float]]):
+    global POS
+    POS.clear()
+    POS.update(positions)
+
+
+def load_calibrated_positions(path: str = "slot_positions.json") -> None:
+    """Robot x, y, z for every slot name. Raises FileNotFoundError if the file is missing."""
+    p = file_path(path)
+    if not os.path.exists(p):
+        raise FileNotFoundError(f"No calibration file: {p}")
+    with open(p, "r") as f:
+        data = json.load(f)
+    set_slot_positions(data)
+    print(f"[TRAY] Loaded {len(POS)} slot coordinates from '{p}'.")
+
+
+def _json_coords() -> dict:
+    """slot -> [x, y, z] from slot_positions.json (loaded on first use) over the COORDS defaults in this file."""
+    global _pos_tried
+    if not POS and not _pos_tried:
+        _pos_tried = True
+        try:
+            load_calibrated_positions()
+        except Exception:
+            pass
+    merged = {k: list(v) for k, v in COORDS.items()}
+    merged.update({k: list(v) for k, v in POS.items()})
+    return merged
+
+
+def _coords() -> dict:
+    """slot -> [x, y, z] used for placing: the middle of each slot box through slot_transform.json when available."""
+    merged = _json_coords()
+    if COORD_SOURCE == "auto" and _load_transform() is not None:
+        for name in boxes():
+            merged[name] = _transform_coords(name)
+    return merged
+
+
+def get_robot_coords_for_slot(name: str) -> list[float]:
+    c = _coords()
+    if name not in c:
+        raise KeyError(f"Unknown slot '{name}'. Ensure slot_positions.json is loaded.")
+    return [float(v) for v in c[name]]
 
 
 def boxes():
@@ -666,12 +184,179 @@ def boxes():
 def check():
     """Report slot coordinate match."""
     b = boxes()
-    print(f"[TRAY] {len(b)} camera slot(s), {len(COORDS)} robot coordinate(s).")
-    miss = sorted(set(b) - set(COORDS))
+    c = _coords()
+    tf = _load_transform() if COORD_SOURCE == "auto" else None
+    if tf is not None:
+        print(f"[TRAY] Robot coordinates: middle of each slot box -> robot via slot_transform.json "
+              f"({tf['kind']}, fit error {tf['rms']} mm, z={SLOT_Z if SLOT_Z is not None else tf['z']}).")
+    else:
+        print("[TRAY] Robot coordinates: from slot_positions.json / COORDS (no slot_transform.json).")
+    print(f"[TRAY] {len(b)} camera slot(s), {len(c)} robot coordinate(s).")
+    miss = sorted(set(b) - set(c))
     if miss:
         print(f"[TRAY WARNING] No robot coordinates for {miss}, unused.")
 
 
+# ===========================================================
+# SLOT BOX MIDDLE -> ROBOT COORDINATES
+# ===========================================================
+def _load_transform():
+    """slot_transform.json -> {"H": 3x3, "z", "kind", "rms"} or None. Cached."""
+    global _tf, _tf_tried
+    if not _tf_tried:
+        _tf_tried = True
+        if os.path.exists(TRANSFORM):
+            try:
+                with open(TRANSFORM) as f:
+                    d = json.load(f)
+                _tf = {"H": np.array(d["matrix"], dtype=np.float64), "z": float(d["z"]),
+                       "kind": d.get("kind", "homography"), "rms": d.get("rms_mm")}
+            except Exception as e:
+                print(f"[TRAY ERROR] Cannot read {TRANSFORM}: {e}")
+    return _tf
+
+
+def slot_center(name: str) -> tuple[float, float]:
+    """Pixel middle of a slot box from slot_config.json."""
+    x1, y1, x2, y2 = boxes()[name]
+    return (x1 + x2) / 2.0, (y1 + y2) / 2.0
+
+
+def _apply(H, u, v):
+    p = H @ np.array([u, v, 1.0])
+    return float(p[0] / p[2]), float(p[1] / p[2])
+
+
+def pixel_to_robot(u: float, v: float) -> tuple[float, float]:
+    """Robot x, y (mm) of a pixel on the tray plane."""
+    tf = _load_transform()
+    if tf is None:
+        raise RuntimeError("No slot_transform.json - run: python tray_camera.py --calibrate-transform")
+    return _apply(tf["H"], u, v)
+
+
+def _transform_coords(name: str) -> list[float]:
+    tf = _load_transform()
+    x, y = pixel_to_robot(*slot_center(name))
+    z = SLOT_Z if SLOT_Z is not None else tf["z"]
+    return [round(x, 1), round(y, 1), round(float(z), 1)]
+
+
+def fit_transform(points) -> tuple[float, float]:
+    """
+    points = [((pixel_u, pixel_v), (robot_x, robot_y, robot_z)), ...]  -> saves slot_transform.json.
+    3 points give an exact affine map, 4 or more a least-squares homography. Returns (rms_mm, max_mm).
+    """
+    global _tf, _tf_tried
+    if len(points) < 3:
+        raise ValueError("Need at least 3 reference points (4 or more recommended).")
+    src = np.array([p[0] for p in points], dtype=np.float64)
+    xyz = np.array([p[1] for p in points], dtype=np.float64)
+    dst = xyz[:, :2]
+    sv = np.linalg.svd(src - src.mean(axis=0), compute_uv=False)
+    if sv[-1] < 1e-6 or sv[-1] / sv[0] < 0.05:
+        raise ValueError("The reference points are (almost) in a line - spread them over the tray.")
+    if len(points) == 3:
+        M = cv.getAffineTransform(src.astype(np.float32), dst.astype(np.float32))
+        H, kind = np.vstack([M, [0.0, 0.0, 1.0]]), "affine"
+    else:
+        H, _ = cv.findHomography(src, dst, 0)
+        kind = "homography"
+        if H is None:
+            raise ValueError("Could not fit a transform to these points.")
+    err = np.array([np.hypot(*(np.array(_apply(H, u, v)) - d)) for (u, v), d in zip(src, dst)])
+    rms, worst = float(np.sqrt(np.mean(err ** 2))), float(err.max())
+    z_spread = float(np.ptp(xyz[:, 2]))
+    data = {"kind": kind, "matrix": H.tolist(), "z": float(xyz[:, 2].mean()), "z_spread_mm": z_spread,
+            "rms_mm": round(rms, 2), "max_mm": round(worst, 2),
+            "points": [{"pixel": list(map(float, p[0])), "robot": list(map(float, p[1]))} for p in points],
+            "saved": time.strftime("%Y-%m-%d %H:%M:%S")}
+    with open(TRANSFORM, "w") as f:
+        json.dump(data, f, indent=4)
+    _tf, _tf_tried = None, False                    # reload on next use
+    print(f"[TRAY] Saved {kind} map from {len(points)} points: error rms {rms:.1f} mm, worst {worst:.1f} mm, "
+          f"z = {data['z']:.1f} mm.")
+    if worst > 5:
+        print("[TRAY WARNING] Worst error is over 5 mm - re-measure the points or add more of them.")
+    if z_spread > 5:
+        print(f"[TRAY WARNING] The reference z values differ by {z_spread:.1f} mm; the mean is used as release height.")
+    return rms, worst
+
+
+def fit_from_slots() -> bool:
+    """Fit the mapping from slots whose robot x, y, z you already measured (slot_positions.json / COORDS)."""
+    known = _json_coords()
+    pts = [(slot_center(n), known[n]) for n in boxes() if n in known]
+    print(f"[TRAY] {len(pts)} slot(s) have both a pixel box and measured robot coordinates.")
+    try:
+        fit_transform(pts)
+    except ValueError as e:
+        print(f"[TRAY ERROR] {e}")
+        return False
+    return True
+
+
+def calibrate_transform() -> bool:
+    """
+    Click 4+ points on the tray (3 is the minimum), and for each type the robot X Y Z in mm (jog the gripper to the
+    point, read the pendant). Best points: the middles of the slots, spread out, not all in one line.
+    u = undo, q = fit and save. Needs a console (it asks questions), so run it by hand with vision stopped.
+    """
+    frame = _grab(1.0, 3)
+    if frame is None:
+        return False
+    pts: list = []                                    # [((u, v), (x, y, z))]
+    clicks: list = []
+    win = "Camera -> robot | click a point, then type its robot X Y Z | u undo | q done"
+
+    def mouse(ev, x, y, fl, pr):
+        if ev == cv.EVENT_LBUTTONDOWN:
+            clicks.append((x, y))
+
+    def draw():
+        v = frame.copy()
+        for n, (x1, y1, x2, y2) in boxes().items():                   # slot middles as a click guide
+            cx, cy = int((x1 + x2) / 2), int((y1 + y2) / 2)
+            cv.rectangle(v, (x1, y1), (x2, y2), (120, 120, 120), 1)
+            cv.drawMarker(v, (cx, cy), (0, 200, 255), cv.MARKER_CROSS, 14, 1)
+        for i, ((u, w), _) in enumerate(pts):
+            cv.circle(v, (int(u), int(w)), 6, (0, 220, 60), -1)
+            cv.putText(v, str(i + 1), (int(u) + 8, int(w) - 8), cv.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        return v
+
+    cv.namedWindow(win, cv.WINDOW_NORMAL)
+    cv.setMouseCallback(win, mouse)
+    print("[TRAY] Click a point, then type its robot X Y Z (mm). Cross marks = slot middles. u = undo, q = done.")
+    while True:
+        cv.imshow(win, draw())
+        k = cv.waitKey(20) & 0xFF
+        while clicks:
+            u, w = clicks.pop(0)
+            raw = input(f"  Point {len(pts) + 1} at pixel ({u}, {w}) - robot X Y Z in mm (empty = skip): ")
+            nums = re.findall(r"-?\d+(?:\.\d+)?", raw)
+            if len(nums) == 3:
+                pts.append(((float(u), float(w)), tuple(float(x) for x in nums)))
+            else:
+                print("  skipped (need exactly three numbers)")
+        if k == ord("u") and pts:
+            pts.pop()
+            print(f"  removed - {len(pts)} point(s) left")
+        if k == ord("q") or cv.getWindowProperty(win, cv.WND_PROP_VISIBLE) < 1:
+            break
+    cv.destroyWindow(win)
+    cv.waitKey(1)
+    try:
+        fit_transform(pts)
+    except ValueError as e:
+        print(f"[TRAY ERROR] {e} Nothing saved.")
+        return False
+    check()
+    return True
+
+
+# ===========================================================
+# CAMERA
+# ===========================================================
 def _backends():
     """Platform capture backends."""
     if sys.platform.startswith("win"):
@@ -705,32 +390,99 @@ def _open():
     return None
 
 
-def _grab(wait=0.15, n=3):
-    """Settled averaged frame."""
-    global _cap, _frame
+def _capture_loop():
+    """Continuously drain the camera so no backlog can build up.
+
+    Runs in its own thread for the lifetime of the camera connection. Always overwrites _latest_frame, so only the
+    single newest frame is kept. Does not take _lock (a scan holding it waits for frames from this thread).
+    """
+    global _latest_frame, _latest_time, _cap_lost
+    fails = 0
+    while _cap_running:
+        cap = _cap
+        if cap is None or not cap.isOpened():
+            time.sleep(0.05)
+            continue
+        ok, f = cap.read()
+        if ok and f is not None:
+            fails = 0
+            with _frame_lock:
+                _latest_frame, _latest_time = f, time.time()
+        else:
+            fails += 1
+            time.sleep(0.02)
+            if fails > 100:                 # ~2 s without a frame: camera unplugged / frozen -> reopen on next use
+                _cap_lost = True
+                fails = 0
+        # no sleep on success on purpose - drain as fast as the camera delivers
+
+
+def _ensure_capture_thread():
+    global _cap, _cap_thread, _cap_running, _cap_lost, _next_open_try
+    if _cap is not None and _cap_lost:
+        print("[TRAY] Camera stopped delivering frames - reopening.")
+        _cap.release()
+        _cap, _cap_lost = None, False
     if _cap is None or not _cap.isOpened():
+        if time.time() < _next_open_try:        # don't stall the vision loop retrying on every frame
+            return False
         _cap = _open()
         if _cap is None:
-            print(f"[TRAY ERROR] Cannot open camera {CAM}.")
+            _next_open_try = time.time() + OPEN_RETRY_SECONDS
+            _warn("open", f"[TRAY ERROR] Cannot open camera {CAM}.")
+            return False
+    if _cap_thread is None or not _cap_thread.is_alive():
+        _cap_running = True
+        _cap_thread = threading.Thread(target=_capture_loop, daemon=True)
+        _cap_thread.start()
+    return True
+
+
+def _grab(wait=0.15, n=3):
+    """Settled averaged frame, drawn from the always-fresh background thread."""
+    global _frame
+    if not USE_CAM:
+        f = cv.imread(file_path("test_images/current_state.jpg"))
+        if f is None:
+            _warn("static", "[TRAY ERROR] test_images/current_state.jpg not found.")
             return None
+        _frame = f
+        return f
+
+    if not _ensure_capture_thread():
+        return None
+
+    # brief settle time (e.g. after the camera just opened, or lighting flicker); we read the live background-thread
+    # frame, not a backlog, so this does not compound over repeated calls
     end = time.time() + wait
     while time.time() < end:
-        _cap.read()
-        time.sleep(0.03)
+        time.sleep(0.02)
+
     fs = []
-    for _ in range(n):
-        ok, f = _cap.read()
-        if ok and f is not None:
-            fs.append(f.astype(np.float32))
+    deadline = time.time() + 1.0
+    last_seen = None
+    while len(fs) < n and time.time() < deadline:
+        with _frame_lock:
+            f, t = _latest_frame, _latest_time
+        if f is not None and time.time() - t < FRAME_MAX_AGE:
+            if last_seen is None or not np.array_equal(f, last_seen):
+                fs.append(f.astype(np.float32))
+                last_seen = f
+                continue
+        time.sleep(0.01)
+
     if not fs:
-        print("[TRAY ERROR] No camera frame.")
+        _warn("noframe", "[TRAY ERROR] No camera frame.")
         return None
     _frame = np.mean(fs, axis=0).astype(np.uint8)
     return _frame
 
 
+# ===========================================================
+# DETECTION
+# ===========================================================
 def _diff(a, b):
-    """Changed pixel fraction."""
+    """Changed pixel fraction (brightness-normalised)."""
     a, b = [cv.GaussianBlur(cv.cvtColor(x, cv.COLOR_BGR2GRAY), BLUR, 0).astype(np.float32) for x in (a, b)]
     return float(np.mean(np.abs((b - b.mean()) - (a - a.mean())) > PIX))
 
@@ -753,42 +505,82 @@ def _draw():
     _view, _new = v, True
 
 
-def _scan():
-    """Compare frame with reference."""
+def _scan(n=3, wait=0.15, quiet=False, frac=None):
+    """Compare a fresh frame with the reference. quiet=True prints only when a slot changes state."""
     global _ref, _when
     if _ref is None:
         _ref = cv.imread(REF)
         if _ref is None:
-            print("[TRAY ERROR] No reference image. Calibrate.")
+            _warn("ref", "[TRAY ERROR] No reference image. Calibrate.")
             return False
-    f = _grab()
+    f = _grab(wait, n)
     if f is None:
         return False
     if f.shape != _ref.shape:
-        print("[TRAY ERROR] Camera size changed. Calibrate.")
+        _warn("size", "[TRAY ERROR] Camera size changed. Calibrate.")
         return False
+    limit = FRAC if frac is None else frac
+    fh, fw = f.shape[:2]
+    prev = dict(_seen)
     out = []
-    for n, (x1, y1, x2, y2) in boxes().items():
+    for name, (x1, y1, x2, y2) in boxes().items():
+        if not (0 <= x1 < x2 <= fw and 0 <= y1 < y2 <= fh):      # box sticks out of the picture: never trust it
+            _seen[name] = "unknown"
+            out.append(f"{name} unknown")
+            continue
         r = _diff(_ref[y1:y2, x1:x2], f[y1:y2, x1:x2])
-        _seen[n] = "free" if r < FRAC else "occupied"
-        out.append(f"{n} {_seen[n]} ({r:.0%})")
-    print("[SCAN] " + ", ".join(out))
+        _seen[name] = "free" if r < limit else "occupied"
+        out.append(f"{name} {_seen[name]} ({r:.0%})")
+    if not quiet or any(prev.get(k) != v for k, v in _seen.items()):
+        print("[SCAN] " + ", ".join(out))
     _when = time.time()
     _draw()
     return True
 
 
+# ===========================================================
+# STYLE A: main_tray.py calls
+# ===========================================================
+def get_free_slots(thresh=None, rescan=False, max_age=None):
+    """
+    Returns (states, annotated_image). The last scan is reused while it is younger than LIVE_AGE seconds (so the
+    display loop is cheap); rescan=True always takes a fresh, frame-averaged scan (use it when choosing a slot).
+    `thresh` is only honoured as a fraction between 0 and 1; the older pixel-difference values (20, 50) are ignored.
+    """
+    frac = thresh if (thresh is not None and 0 < thresh <= 1) else None
+    age = LIVE_AGE if max_age is None else max_age
+    with _lock:
+        if rescan or frac is not None:
+            ok = _scan(frac=frac)
+        elif time.time() - _when > age:
+            ok = _scan(n=1, wait=0.0, quiet=True)
+        else:
+            ok = True
+        if not ok:
+            return {}, None
+        return {n: _seen.get(n, "unknown") for n in boxes()}, _view
+
+
+def verify_placement(name: str, thresh=None) -> bool:
+    """True when the slot holds a mug, False while it does not, None after TRIES misses in a row (gave up)."""
+    return verify(name)
+
+
+# ===========================================================
+# STYLE B: original main_tray.py calls
+# ===========================================================
 def reserve():
     """Reserve first free slot."""
     with _lock:
         if time.time() - _when > AGE and not _scan():
             return None
+        c = _coords()
         for n in boxes():
-            if _seen.get(n) == "free" and n not in _res and n in COORDS:
+            if _seen.get(n) == "free" and n not in _res and n in c:
                 _res.add(n)
                 _draw()
-                print(f"[TRAY] Slot '{n}' initialized @ {COORDS[n]}")
-                return n, [float(v) for v in COORDS[n]]
+                print(f"[TRAY] Slot '{n}' initialized @ {c[n]}")
+                return n, [float(v) for v in c[n]]
         print("[TRAY] No free slot.")
         return None
 
@@ -799,7 +591,18 @@ def verify(n):
         ok = _scan()
         _res.discard(n)
         _draw()
-        return _seen.get(n) == "occupied" if ok else None
+        if not ok:
+            _miss.pop(n, None)
+            return None
+        if _seen.get(n) == "occupied":
+            _miss.pop(n, None)
+            return True
+        _miss[n] = _miss.get(n, 0) + 1
+        if _miss[n] < TRIES:
+            return False
+        _miss.pop(n)
+        print(f"[TRAY] Cup not seen in '{n}'. Giving up.")
+        return None
 
 
 def drop(n):
@@ -819,14 +622,24 @@ def view():
 
 
 def close():
-    """Release the camera."""
-    global _cap
+    """Release the camera and stop the background capture thread."""
+    global _cap, _cap_running, _cap_thread
     with _lock:
+        _cap_running = False
+        if _cap_thread is not None:
+            _cap_thread.join(timeout=1.0)
+            _cap_thread = None
         if _cap is not None:
             _cap.release()
             _cap = None
 
 
+release_camera = close
+
+
+# ===========================================================
+# CALIBRATION
+# ===========================================================
 def _click(img):
     """Click two corners per slot."""
     bx, pts = [], []
@@ -893,5 +706,56 @@ def calibrate():
         _boxes, _ref, _when = cfg, ref, 0.0
         _res.clear()
         _seen.clear()
+        _miss.clear()
     print(f"[TRAY] Saved {len(cfg)} slot(s).")
+    if os.path.exists(TRANSFORM):
+        print("[TRAY] slot_transform.json is still used for robot coordinates. If the 2D camera was moved, "
+              "redo it: python tray_camera.py --calibrate-transform")
+    check()
     return True
+
+
+calibrate_slots = calibrate
+
+
+# ===========================================================
+# STANDALONE: calibrate / live view
+# ===========================================================
+if __name__ == "__main__":
+    if "--calibrate" in sys.argv:          # used by the YuMi panel's "Calibrate 2D" button: calibrate, then quit
+        try:
+            done = calibrate()
+        finally:
+            close()
+            cv.destroyAllWindows()
+        sys.exit(0 if done else 1)
+    if "--calibrate-transform" in sys.argv:   # camera pixels -> robot mm (needs a console, vision stopped)
+        try:
+            done = calibrate_transform()
+        finally:
+            close()
+            cv.destroyAllWindows()
+        sys.exit(0 if done else 1)
+    if "--fit-from-slots" in sys.argv:
+        sys.exit(0 if fit_from_slots() else 1)
+    print("=" * 60)
+    print("  TRAY CAMERA - standalone")
+    print("=" * 60)
+    try:
+        load_calibrated_positions()
+    except FileNotFoundError as e:
+        print(f"[INFO] {e}")
+    check()
+    try:
+        if input("\nCalibrate slots now (tray EMPTY, arm out of view)? (y/n): ").strip().lower() == "y":
+            calibrate()
+        print("\nLive view: green = free, red = occupied. Press q in the window to quit.")
+        while True:
+            _states, img = get_free_slots()
+            if img is not None:
+                cv.imshow("Tray Test (press q to quit)", img)
+            if cv.waitKey(30) & 0xFF == ord("q"):
+                break
+    finally:
+        close()
+        cv.destroyAllWindows()

@@ -8,6 +8,11 @@ MODULE MugManipulation
         VAR orient hand_rotation;
         VAR robtarget approach_point;
         VAR pos offset_dir;
+        
+        !test 1
+        VAR robtarget entry_point;
+        VAR num open_mm;
+        VAR num close_mm;
      
         
 
@@ -17,8 +22,8 @@ MODULE MugManipulation
                 mug_position.z := 55;
                 TPWrite "upright fetch";
             ELSE
-                mug_position.z := 35;
-                
+              !  mug_position.z := 35;
+                mug_position.z := 45;
                 TPWrite "downward fetch";
 
             ENDIF
@@ -38,54 +43,81 @@ MODULE MugManipulation
         approach_point := target;
       
     ! Path Logic: Match the approach style to the area
-    
+        
+        cycleGripOutDone := FALSE;
+        ClkReset cycleClock;
+        ClkStart cycleClock;
         g_GripOut;
+        entry_point := CRobT(\Tool:=tGripper);  !test 1
+        
+        gripper_position := g_GetPos();
+        TPWrite "gripper before" \Num:=gripper_position;
+        ErrWrite \I, "gripper before: " + NumToStr(gripper_position, 3) + " s", "";
                 
-        IF (RobName() = "ROB_L" AND mug_position.x > xval AND mug_position.y < 235) THEN !AND mug_position.y > 235
+        IF (RobName() = "ROB_L" AND mug_position.x > xval) THEN ! AND mug_position.y > yval
                             
             TPWrite "normal approach";
-          !  x_offset := -30; !15 15
-        !   y_offset := -30;
-            x_offset := 5;  !-8
+
+            x_offset := 5;  
             y_offset := -22;
        
         
             IF (mug_normal.z = 1 OR mug_normal.z = -1) THEN
-               
+      
+      
                 MoveJ pSafeEntryNormalC, transit_speed,fine,tGripper;
-                hand_rotation := [0.653281,0.653281,0.270598,0.270598];
+                hand_rotation := [0.653281,0.653281,0.270598,0.270598]; 
+            
                 pSafeEntryNormalV.rot := hand_rotation;
-                pSafeEntryNormalV.trans := mug_position + [-100, 100, 0]; 
-                MoveJ pSafeEntryNormalV, transit_speed,fine,tGripper;
-
+                pSafeEntryNormalV.trans := mug_position + [-50, 50, 0]; 
+              
+            
+                entry_point:= pSafeEntryNormalV; !test 1
+                MoveJ entry_point, transit_speed,fine,tGripper;
+                
+               ! MoveJ pSafeEntryNormalV, transit_speed,fine,tGripper;
+            
            ELSE
                MoveJ pSafeEntryOvanC, transit_speed,fine,tGripper;
                TPWrite "From Above";
                pSafeEntryNormalV.rot := hand_rotation;
                pSafeEntryNormalV.trans := mug_position + [0, 0, 40]; 
-               MoveL pSafeEntryNormalV, transit_speed,fine,tGripper;
+               
+               entry_point:= pSafeEntryNormalV; !test 1
+               MoveL entry_point, transit_speed,fine,tGripper;
+               
+               !MoveL pSafeEntryNormalV, transit_speed,fine,tGripper;
 
            ENDIF
            
             
-           ! MoveJ pSafeEntryNormalV, transit_speed,fine,tGripper;
+          
             
-        ELSEIF(RobName() = "ROB_L" AND mug_position.x < xval AND mug_position.y < yval) THEN
+        ELSEIF(RobName() = "ROB_L" AND mug_position.x < xval AND mug_position.y > yval) THEN
+       
         ! SIDE APPROACH PATH: Moves to the left corridor
               !if not upright or upside down
-            !  TPWrite "Left side approach";
+            
             IF (mug_normal.z = 1 OR mug_normal.z = -1) THEN 
                 TPWrite "Left side approach";
-                      !   x_offset := -8;
-                      !   y_offset := -20;
-        
+                    
+                         y_offset := -30;
+                         
+                hand_rotation := [0.7,0.71,0,-0.036];
                 pSafeEntryLeft.trans  := mug_position + [0, 60, 0]; 
-                MoveJ pSafeEntryLeft, transit_speed,z50,tGripper;
+                
+                entry_point:= pSafeEntryLeft; !test 1
+                MoveJ entry_point, transit_speed,z50,tGripper;
+                
+             !   MoveJ pSafeEntryLeft, transit_speed,z50,tGripper;
                 
             ELSE
                 pSafeEntryOvanC2.trans  := mug_position + [0, 0, 300];
                 TPWrite "Close From Above";
-                MoveJ pSafeEntryOvanC2, transit_speed,fine,tGripper;
+                entry_point:= pSafeEntryOvanC2; !test 1
+                MoveJ  entry_point, transit_speed,fine,tGripper;
+                
+             !   MoveJ pSafeEntryOvanC2, transit_speed,fine,tGripper;
             
             ENDIF
         ENDIF
@@ -107,16 +139,39 @@ MODULE MugManipulation
         
         !pick up mug
  !        target.trans := mug_position + offset_dir*gripper_offset;
-         moveL target,v500,fine,tGripper;
         
+        open_mm :=g_GetPos();  !test 1
+        ErrWrite \I, "open_mm: " + NumToStr(open_mm, 3) + "mm", "";
+        moveL target,v500,fine,tGripper;
+        
+        
+         
         ! grippers in
         WaitTime(1);
-        g_GripIn \HoldForce:=20;
+        g_GripIn \HoldForce:=4.5;
+        
+        close_mm := g_GetPos();   !test 1
+        ErrWrite \I, "close_mm: " + NumToStr(close_mm, 3) + "mm", "";
+        
+       ! gripper_position := g_GetPos();                                                   
+       ! ErrWrite \I, "gripper after: " + NumToStr(gripper_position, 3) + " s", "";
+
+    !  IF(open_mm > 1) AND (close_mm < open_mm /4) THEN    !test 1
+    IF(close_mm = 0) THEN 
+          TPWrite "Empty grasp, return to entry";
+          g_GripOut;
+          MoveJ entry_point, transit_speed, fine,tGripper;
+          shared_movement_left.flag := flag_nothing;
+          RETURN;
+      ENDIF
+        
+       ! IF (gripper_position < 50) THEN         redan kommenterade bort innan test 1
+         !   moveToHomeTarget;
 
 !        WaitTime(1);
         moveL Offs(target,0,0,30),movement_speed,z50,tGripper;
         WaitTime(0.2);
-        target.trans := mug_position - offset_dir*offset_lenght + [0,0,20]; ! *offset_z_when_fetching
+        target.trans := mug_position - offset_dir*offset_lenght + [0,20,20]; ! *offset_z_when_fetching
 
         
         moveL target,v500,z50,tGripper; 
@@ -134,6 +189,7 @@ PROC handOverSequence()
         CONST num handover_y_offset := -8;
        
         target := CRobT(\Tool := tGripper);
+    !    gripper_position := grip_max;
         
         ! ===========================================================
         ! THE FIX: FORCE STANDARD ORIENTATION (THE FLIP)
@@ -193,7 +249,7 @@ PROC handOverSequence()
             
             ! Wait for Right arm to secure the grip
             WaitUntil shared_movement_left.wait_flag = TRUE; 
-            
+            WaitTime 0.2;
             g_GripOut;
             WaitTime 0.2;
             
@@ -202,7 +258,14 @@ PROC handOverSequence()
             MoveL target, movement_speed, z50, tGripper;
             
             shared_movement_left.wait_flag := FALSE; 
-        ENDIF
+            
+            !end timer
+            WaitUntil cycleGripOutDone;
+            ClkStop cycleClock;
+            TPWrite "Cycle time (s): "\Num:=ClkRead(cycleClock);
+          !  ErrWrite \I, "Cycle time (s):", NumToStr(ClkRead(cycleClock), 2);
+            ErrWrite \I, "Cycle time(s): " + NumToStr(ClkRead(cycleClock), 3) + " s", "";
+        ENDIF        
     ENDPROC
         
     ! leave mug with dynamic coordinates
