@@ -58,22 +58,32 @@ MODULE MugManipulation
                             
             TPWrite "normal approach";
 
-            x_offset := 5;  
-            y_offset := -22;
+         !   x_offset := 5;  
+         !   y_offset := -22;
        
         
             IF (mug_normal.z = 1 OR mug_normal.z = -1) THEN
-      
-      
+            
                 MoveJ pSafeEntryNormalC, transit_speed,fine,tGripper;
                 hand_rotation := [0.653281,0.653281,0.270598,0.270598]; 
+                
+                IF(RobName() = "ROB_L" AND mug_position.x > 560 AND mug_position.y > 170)THEN  ! längst bak (170 är vänser), kan inte nå dit med vinkel på hand
+                    
+                     hand_rotation := [0.44079,0.33107,0.61122,0.56789]; 
+                     
+                     IF(RobName() = "ROB_L" AND mug_position.x > 605 AND mug_position.x < 680) THEN  ! mug ligger på gräns 
+                        TPWrite "gräns";
+                        
+                        mug_position.x := 605;
+                     ENDIF
+                ENDIF
             
                 pSafeEntryNormalV.rot := hand_rotation;
-                pSafeEntryNormalV.trans := mug_position + [-50, 50, 0]; 
-              
+                !pSafeEntryNormalV.trans := mug_position + [-30, 30, 0]; 
+                pSafeEntryNormalV.trans := mug_position + [-30, 15, 0]; 
             
                 entry_point:= pSafeEntryNormalV; !test 1
-                MoveJ entry_point, transit_speed,fine,tGripper;
+                MoveJ entry_point, transit_speed,z10,tGripper;
                 
                ! MoveJ pSafeEntryNormalV, transit_speed,fine,tGripper;
             
@@ -93,7 +103,7 @@ MODULE MugManipulation
             
           
             
-        ELSEIF(RobName() = "ROB_L" AND mug_position.x < xval AND mug_position.y > yval) THEN
+        ELSEIF(RobName() = "ROB_L" AND mug_position.x < xval AND mug_position.y < yval) THEN
        
         ! SIDE APPROACH PATH: Moves to the left corridor
               !if not upright or upside down
@@ -101,7 +111,7 @@ MODULE MugManipulation
             IF (mug_normal.z = 1 OR mug_normal.z = -1) THEN 
                 TPWrite "Left side approach";
                     
-                         y_offset := -30;
+                       !  y_offset := -30;
                          
                 hand_rotation := [0.7,0.71,0,-0.036];
                 pSafeEntryLeft.trans  := mug_position + [0, 60, 0]; 
@@ -123,7 +133,7 @@ MODULE MugManipulation
         ENDIF
         
 
-         
+        MoveJ  entry_point, transit_speed,fine,tGripper; 
         target := CRobT(\Tool := tGripper);
         ConfJ \Off;
 
@@ -171,7 +181,7 @@ MODULE MugManipulation
 !        WaitTime(1);
         moveL Offs(target,0,0,30),movement_speed,z50,tGripper;
         WaitTime(0.2);
-        target.trans := mug_position - offset_dir*offset_lenght + [0,20,20]; ! *offset_z_when_fetching
+        target.trans := mug_position - offset_dir*offset_lenght + [0,20,30]; ! *offset_z_when_fetching
 
         
         moveL target,v500,z50,tGripper; 
