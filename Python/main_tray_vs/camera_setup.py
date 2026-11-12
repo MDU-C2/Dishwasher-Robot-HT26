@@ -1,9 +1,14 @@
 import os
+import cv2 as cv
 import depthai as dai
 import numpy as np
 import json
 
 _MODEL_DIR = os.path.dirname(os.path.abspath(__file__))
+_V11Z_BLOB = os.path.join(_MODEL_DIR, "blob_v11z", "v11Z.blob")
+if not os.path.isfile(_V11Z_BLOB):
+    _V11Z_BLOB = os.path.join(_MODEL_DIR, "v11Z.blob")
+
 DETECTION_MODELS = {
     "v5": {
         "config": os.path.join(_MODEL_DIR, "blob_v5", "best_Yolo5_small.json"),
@@ -17,14 +22,44 @@ DETECTION_MODELS = {
         "config": os.path.join(_MODEL_DIR, "blob_v8n", "config_legacy.json"),
         "blob": os.path.join(_MODEL_DIR, "blob_v8n", "best.blob"),
     },
+    "v11z": {
+        "config": os.path.join(_MODEL_DIR, "blob_v11z", "config_legacy.json"),
+        "blob": _V11Z_BLOB,
+    },
+}
+_MODEL_ALIASES = {
+    "5": "v5",
+    "5s": "v5s",
+    "8": "v8",
+    "11": "v11z",
+    "11z": "v11z",
+    "11s": "v11z",
+    "v11": "v11z",
+    "v11s": "v11z",
+    "v11z": "v11z",
 }
 
 
+def _uses_raw_yolo_output(blob_path):
+    """Return True if the blob outputs a single raw YOLO tensor (e.g. output0 [8400, 4+C, 1]) instead of split grid heads."""
+    try:
+        blob = dai.OpenVINO.Blob(blob_path)
+        outputs = list(blob.networkOutputs.keys())
+        if len(outputs) == 1:
+            name = outputs[0].lower()
+            if not any(tag in name for tag in ("yolov5", "yolov6", "yolov7", "yolov8", "yolov10")):
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def load_detection_model(model):
-    """Return config, blob path, and network input size for v5, v5s, or v8."""
+    """Return config, blob path, and network input size for v5, v5s, v8, or v11z."""
     key = str(model).strip().lower()
+    key = _MODEL_ALIASES.get(key, key)
     if key not in DETECTION_MODELS:
-        raise ValueError(f"Unknown detection model '{model}'. Use v5, v5s, or v8.")
+        raise ValueError(f"Unknown detection model '{model}'. Use v5, v5s, v8, or v11z.")
     paths = DETECTION_MODELS[key]
     with open(paths["config"], "r", encoding="utf-8") as f:
         config = json.load(f)
@@ -37,6 +72,7 @@ def load_detection_model(model):
         "config": config,
         "input_width": int(width_text),
         "input_height": int(height_text),
+        "raw_yolo_output": _uses_raw_yolo_output(paths["blob"]),
     }
 
 
@@ -225,7 +261,10 @@ def camera_setup(cam_coords, robot_file, model="v5"):
     mono_left  = pipeline.create(dai.node.MonoCamera)
     mono_right = pipeline.create(dai.node.MonoCamera)
     stereo     = pipeline.create(dai.node.StereoDepth)
-    detection_nn = pipeline.create(dai.node.YoloSpatialDetectionNetwork)
+    if detection_model.get("raw_yolo_output"):
+        detection_nn = pipeline.create(dai.node.NeuralNetwork)
+    else:
+        detection_nn = pipeline.create(dai.node.YoloSpatialDetectionNetwork)
 
     # Define XLink outputs for streaming frames and detections to host
     xout_rgb   = pipeline.create(dai.node.XLinkOut)
@@ -240,7 +279,7 @@ def camera_setup(cam_coords, robot_file, model="v5"):
     cam_rgb.setPreviewSize(input_width, input_height)
     cam_rgb.setInterleaved(False)
     cam_rgb.setColorOrder(dai.ColorCameraProperties.ColorOrder.BGR)
-    if detection_model["name"] in ("v5s", "v8"):
+    if detection_model["name"] in ("v5s", "v8", "v11z"):
         cam_rgb.setResolution(dai.ColorCameraProperties.SensorResolution.THE_1080_P)
         cam_rgb.setPreviewKeepAspectRatio(False)
     else:
@@ -255,7 +294,7 @@ def camera_setup(cam_coords, robot_file, model="v5"):
     # Stereo depth configuration
     stereo.setDefaultProfilePreset(dai.node.StereoDepth.PresetMode.HIGH_DENSITY)
     stereo.setDepthAlign(dai.CameraBoardSocket.RGB)
-    if detection_model["name"] in ("v5s", "v8"):
+    if detection_model["name"] in ("v5s", "v8", "v11z"):
         stereo.setOutputSize(input_width, input_height)
         stereo.setOutputKeepAspectRatio(False)
     else:
@@ -266,30 +305,196 @@ def camera_setup(cam_coords, robot_file, model="v5"):
     stereo.setExtendedDisparity(True)
     print("[DEPTH] mono=400P  ExtendedDisparity=True  Subpixel=False")
 
-    # Specific settings for the network
-    detection_nn.setConfidenceThreshold(confidenceThreshold)
-    detection_nn.setNumClasses(classes)
-    detection_nn.setCoordinateSize(coordinates)
-    detection_nn.setAnchors(anchors)
-    detection_nn.setAnchorMasks(anchorMasks)
-    detection_nn.setIouThreshold(iouThreshold)
-    detection_nn.setBlobPath(detection_model["blob_path"])
-    detection_nn.setNumInferenceThreads(2)
-    detection_nn.input.setBlocking(False)
-
     syncNN = True
 
-    # Linking
-    cam_rgb.preview.link(detection_nn.input)
-    mono_left.out.link(stereo.left)
-    mono_right.out.link(stereo.right)
-    stereo.depth.link(detection_nn.inputDepth)
+    if detection_model.get("raw_yolo_output"):
+        print(f"[MODEL] Raw YOLO output tensor detected for {detection_model['name']} -> using host-side YOLO11/v8 decoder + spatial depth calculator.")
+        detection_nn.setBlobPath(detection_model["blob_path"])
+        detection_nn.setNumInferenceThreads(1)
+        detection_nn.input.setBlocking(False)
 
-    detection_nn.passthrough.link(xout_rgb.input) # Passthrough RGB frames (frames that went into NN)
-    detection_nn.passthroughDepth.link(xout_depth.input) # Aligned depth frames
-    detection_nn.out.link(xout_nn.input) # Detection outputs (bounding boxes + coordinates)
+        # Linking for raw NeuralNetwork + aligned StereoDepth
+        cam_rgb.preview.link(detection_nn.input)
+        mono_left.out.link(stereo.left)
+        mono_right.out.link(stereo.right)
+
+        detection_nn.passthrough.link(xout_rgb.input)
+        stereo.depth.link(xout_depth.input)
+        detection_nn.out.link(xout_nn.input)
+    else:
+        # Specific settings for the network
+        detection_nn.setConfidenceThreshold(confidenceThreshold)
+        detection_nn.setNumClasses(classes)
+        detection_nn.setCoordinateSize(coordinates)
+        detection_nn.setAnchors(anchors)
+        detection_nn.setAnchorMasks(anchorMasks)
+        detection_nn.setIouThreshold(iouThreshold)
+        detection_nn.setBlobPath(detection_model["blob_path"])
+        detection_nn.setNumInferenceThreads(2)
+        detection_nn.input.setBlocking(False)
+
+        # Linking
+        cam_rgb.preview.link(detection_nn.input)
+        mono_left.out.link(stereo.left)
+        mono_right.out.link(stereo.right)
+        stereo.depth.link(detection_nn.inputDepth)
+
+        detection_nn.passthrough.link(xout_rgb.input) # Passthrough RGB frames (frames that went into NN)
+        detection_nn.passthroughDepth.link(xout_depth.input) # Aligned depth frames
+        detection_nn.out.link(xout_nn.input) # Detection outputs (bounding boxes + coordinates)
 
     return homogeneous, syncNN, pipeline, labels, rotation_matrix, translation_vector, camera_points, robot_points
+
+
+_CALIB_INTRINSICS_CACHE = {}
+
+
+def _get_rgb_intrinsics(device, width, height):
+    """Read and cache RGB camera intrinsics scaled to (width, height)."""
+    key = (id(device), int(width), int(height))
+    if key not in _CALIB_INTRINSICS_CACHE:
+        try:
+            calib = device.readCalibration()
+            M = np.array(
+                calib.getCameraIntrinsics(dai.CameraBoardSocket.RGB, 1920, 1080),
+                dtype=np.float64,
+            )
+            sx = float(width) / 1920.0
+            sy = float(height) / 1080.0
+            fx = float(M[0, 0]) * sx
+            fy = float(M[1, 1]) * sy
+            cx = float(M[0, 2]) * sx
+            cy = float(M[1, 2]) * sy
+        except Exception:
+            # Fallback approximate intrinsics for OAK-D RGB stretched to width x height
+            fx = 1500.0 * (float(width) / 1920.0)
+            fy = 1500.0 * (float(height) / 1080.0)
+            cx = float(width) * 0.5
+            cy = float(height) * 0.5
+        _CALIB_INTRINSICS_CACHE[key] = (fx, fy, cx, cy)
+    return _CALIB_INTRINSICS_CACHE[key]
+
+
+def extract_detections(in_dets, in_depth=None, device=None, model_info=None):
+    """Return a list of SpatialImgDetection objects from either ImgDetections or raw YOLO NNData."""
+    if hasattr(in_dets, "detections"):
+        return in_dets.detections
+
+    if model_info is None:
+        return []
+
+    config = model_info.get("config", {})
+    metadata = config.get("nn_config", {}).get("NN_specific_metadata", {})
+    num_classes = int(metadata.get("classes", 7))
+    conf_thres = float(metadata.get("confidence_threshold", 0.5))
+    iou_thres = float(metadata.get("iou_threshold", 0.5))
+    input_w = float(model_info.get("input_width", 640))
+    input_h = float(model_info.get("input_height", 640))
+
+    fp16_vals = in_dets.getFirstLayerFp16() if hasattr(in_dets, "getFirstLayerFp16") else []
+    if len(fp16_vals) == 0:
+        layer_names = in_dets.getAllLayerNames()
+        if not layer_names:
+            return []
+        fp16_vals = in_dets.getLayerFp16(layer_names[0])
+    raw = np.array(fp16_vals, dtype=np.float32)
+    channels = 4 + num_classes
+    if raw.size % channels != 0:
+        return []
+
+    preds = raw.reshape(channels, -1)  # shape: (4 + num_classes, num_anchors) e.g. (11, 8400)
+    boxes_cxcywh = preds[:4, :]
+    class_scores = preds[4:, :]
+
+    class_ids = np.argmax(class_scores, axis=0)
+    max_scores = class_scores[class_ids, np.arange(class_scores.shape[1])]
+
+    mask = max_scores >= conf_thres
+    if not np.any(mask):
+        return []
+
+    boxes_cxcywh = boxes_cxcywh[:, mask].T  # (N, 4)
+    scores = max_scores[mask]
+    c_ids = class_ids[mask]
+
+    cx_arr = boxes_cxcywh[:, 0]
+    cy_arr = boxes_cxcywh[:, 1]
+    w_arr = boxes_cxcywh[:, 2]
+    h_arr = boxes_cxcywh[:, 3]
+
+    # Normalize to [0, 1] if coordinates are in pixels (e.g. 0..640)
+    if np.max(boxes_cxcywh) > 2.0:
+        cx_arr = cx_arr / input_w
+        w_arr = w_arr / input_w
+        cy_arr = cy_arr / input_h
+        h_arr = h_arr / input_h
+
+    xmin_arr = np.clip(cx_arr - 0.5 * w_arr, 0.0, 1.0)
+    ymin_arr = np.clip(cy_arr - 0.5 * h_arr, 0.0, 1.0)
+    xmax_arr = np.clip(cx_arr + 0.5 * w_arr, 0.0, 1.0)
+    ymax_arr = np.clip(cy_arr + 0.5 * h_arr, 0.0, 1.0)
+
+    nms_boxes = []
+    for i in range(len(scores)):
+        bx = float(xmin_arr[i] * input_w)
+        by = float(ymin_arr[i] * input_h)
+        bw = float((xmax_arr[i] - xmin_arr[i]) * input_w)
+        bh = float((ymax_arr[i] - ymin_arr[i]) * input_h)
+        nms_boxes.append([bx, by, bw, bh])
+
+    indices = cv.dnn.NMSBoxes(nms_boxes, scores.tolist(), conf_thres, iou_thres)
+    if len(indices) == 0:
+        return []
+
+    depth_frame = in_depth.getFrame() if in_depth is not None else None
+    if depth_frame is not None and device is not None:
+        dh, dw = depth_frame.shape[:2]
+        fx, fy, opt_cx, opt_cy = _get_rgb_intrinsics(device, dw, dh)
+    else:
+        dh, dw = int(input_h), int(input_w)
+        fx, fy, opt_cx, opt_cy = 1.0, 1.0, dw * 0.5, dh * 0.5
+
+    results = []
+    for idx in np.array(indices).flatten():
+        det = dai.SpatialImgDetection()
+        det.label = int(c_ids[idx])
+        det.confidence = float(scores[idx])
+        det.xmin = float(xmin_arr[idx])
+        det.ymin = float(ymin_arr[idx])
+        det.xmax = float(xmax_arr[idx])
+        det.ymax = float(ymax_arr[idx])
+
+        x_mm, y_mm, z_mm = 0.0, 0.0, 0.0
+        if depth_frame is not None:
+            # Use center 50% of bounding box (scale factor 0.5, matching YoloSpatialDetectionNetwork default)
+            box_w = det.xmax - det.xmin
+            box_h = det.ymax - det.ymin
+            roi_xmin = det.xmin + 0.25 * box_w
+            roi_xmax = det.xmax - 0.25 * box_w
+            roi_ymin = det.ymin + 0.25 * box_h
+            roi_ymax = det.ymax - 0.25 * box_h
+
+            px1 = max(0, min(dw - 1, int(roi_xmin * dw)))
+            px2 = max(px1 + 1, min(dw, int(roi_xmax * dw)))
+            py1 = max(0, min(dh - 1, int(roi_ymin * dh)))
+            py2 = max(py1 + 1, min(dh, int(roi_ymax * dh)))
+
+            roi = depth_frame[py1:py2, px1:px2]
+            valid = roi[(roi > 100) & (roi < 10000)]
+            if valid.size > 0:
+                z_mm = float(np.mean(valid))
+                u_center = 0.5 * (det.xmin + det.xmax) * dw
+                v_center = 0.5 * (det.ymin + det.ymax) * dh
+                # DepthAI spatial coordinate convention: +X right, +Y up, +Z forward
+                x_mm = (u_center - opt_cx) * z_mm / fx
+                y_mm = (opt_cy - v_center) * z_mm / fy
+
+        det.spatialCoordinates.x = float(x_mm)
+        det.spatialCoordinates.y = float(y_mm)
+        det.spatialCoordinates.z = float(z_mm)
+        results.append(det)
+
+    return results
 
 def camera_setup2(cam_coords, robot_file):
     best_comb =  [9, 10, 4, 53, 38, 23, 78, 73, 72, 56, 75, 50, 21, 26, 22, 70, 35, 1, 13, 19, 30, 5, 77, 14, 18, 52, 68, 34, 62, 43, 29, 54, 41, 59, 42, 63, 7, 16, 67, 47, 48, 33, 74, 51, 37, 55, 44, 2, 32, 3, 0, 31, 64, 6, 8, 40, 36, 66, 20, 28, 61, 76, 57, 39, 15, 25, 27, 60, 11, 17, 45, 71, 12, 65, 24, 46, 49, 58]

@@ -3,7 +3,9 @@ tray_camera.py - 2D tray camera: which dishwasher slots are free, and where the 
 
 Detection: both pictures are turned into blurred grayscale and each is shifted to zero mean brightness, so a change in
 room lighting does not look like a mug. A slot is OCCUPIED when more than FRAC of its pixels still differ by PIX.
-A background thread keeps only the newest camera frame, so old frames can never pile up.
+Before comparing, feature matching aligns the saved reference and calibrated slot boxes to the live view. A background
+thread keeps only the newest camera frame, so old frames can never pile up. If alignment is uncertain, slots are
+reported as unknown rather than occupied.
 
 Two calling styles are supported (use either):
 
@@ -60,7 +62,7 @@ REF = os.path.join(DIR, "test_images", "empty_tray.jpg")
 
 #Change before running (optional: slot_positions.json is used too and wins over these)
 COORDS = {
- #   "slot_1": [335.0, -402.0, 160.0],
+  "slot_1": [335.0, -402.0, 160.0],
  #  "slot_2": [441.0, -402.0, 160.0],
  #  "slot_3": [506.0, -166.0, 170.0],
 }
@@ -83,6 +85,7 @@ _view = None
 _new = False
 _when = 0.0
 _boxes = None
+_active_boxes = {}
 _res = set()
 _seen = {}
 _miss = {}
@@ -487,17 +490,95 @@ def _diff(a, b):
     return float(np.mean(np.abs((b - b.mean()) - (a - a.mean())) > PIX))
 
 
+def _align_reference(reference, current):
+    """Map calibrated-reference pixels to the current camera view using stable image features."""
+    ref_gray = cv.cvtColor(reference, cv.COLOR_BGR2GRAY)
+    cur_gray = cv.cvtColor(current, cv.COLOR_BGR2GRAY)
+    detector = cv.ORB_create(nfeatures=2500, edgeThreshold=15)
+    ref_points, ref_desc = detector.detectAndCompute(ref_gray, None)
+    cur_points, cur_desc = detector.detectAndCompute(cur_gray, None)
+    if ref_desc is None or cur_desc is None:
+        return None
+
+    pairs = cv.BFMatcher(cv.NORM_HAMMING).knnMatch(ref_desc, cur_desc, k=2)
+    good = [m for pair in pairs if len(pair) == 2 for m, n in [pair] if m.distance < 0.75 * n.distance]
+    if len(good) < 10:
+        return None
+
+    src = np.float32([ref_points[m.queryIdx].pt for m in good]).reshape(-1, 1, 2)
+    dst = np.float32([cur_points[m.trainIdx].pt for m in good]).reshape(-1, 1, 2)
+    matrix, mask = cv.findHomography(src, dst, cv.RANSAC, 4.0)
+    if matrix is None or mask is None or not np.isfinite(matrix).all():
+        return None
+
+    inliers = mask.ravel().astype(bool)
+    inlier_count = int(np.count_nonzero(inliers))
+    if inlier_count < 8 or inlier_count / len(good) < 0.25:
+        return None
+
+    projected = cv.perspectiveTransform(src[inliers], matrix)
+    errors = np.linalg.norm(projected - dst[inliers], axis=2).ravel()
+    if not np.isfinite(errors).all() or float(np.median(errors)) > 3.0:
+        return None
+
+    h, w = reference.shape[:2]
+    saved_boxes = boxes()
+    if not saved_boxes:
+        return None
+    xs = [p for box in saved_boxes.values() for p in (box[0], box[2])]
+    ys = [p for box in saved_boxes.values() for p in (box[1], box[3])]
+    x0, x1 = max(0, min(xs)), min(w - 1, max(xs))
+    y0, y1 = max(0, min(ys)), min(h - 1, max(ys))
+    if x1 <= x0 or y1 <= y0:
+        return None
+    inlier_xy = src[inliers].reshape(-1, 2)
+    if (np.ptp(inlier_xy[:, 0]) < 0.2 * (x1 - x0) or
+            np.ptp(inlier_xy[:, 1]) < 0.2 * (y1 - y0)):
+        return None
+    corners = np.float32([[[x0, y0]], [[x1, y0]], [[x1, y1]], [[x0, y1]]])
+    moved = cv.perspectiveTransform(corners, matrix).reshape(4, 2)
+    if not np.isfinite(moved).all():
+        return None
+    area_ratio = cv.contourArea(moved.astype(np.float32)) / float((x1 - x0) * (y1 - y0))
+    if not 0.5 <= area_ratio <= 2.0:
+        return None
+    if (moved[:, 0].min() < 0 or moved[:, 1].min() < 0 or
+            moved[:, 0].max() >= current.shape[1] or moved[:, 1].max() >= current.shape[0]):
+        return None
+    return matrix
+
+
+def _map_boxes(matrix, image_shape):
+    """Return calibrated slot boxes projected into the current camera frame."""
+    h, w = image_shape[:2]
+    mapped = {}
+    for name, (x1, y1, x2, y2) in boxes().items():
+        corners = np.float32([[[x1, y1]], [[x2, y1]], [[x2, y2]], [[x1, y2]]])
+        moved = cv.perspectiveTransform(corners, matrix).reshape(4, 2)
+        if not np.isfinite(moved).all():
+            return None
+        bx, by, bw, bh = cv.boundingRect(moved.astype(np.float32))
+        bx0, by0 = max(0, bx), max(0, by)
+        bx1, by1 = min(w, bx + bw), min(h, by + bh)
+        if bx1 <= bx0 or by1 <= by0:
+            return None
+        mapped[name] = [bx0, by0, bx1, by1]
+    return mapped
+
+
 def _draw():
     """Render slot status image."""
     global _view, _new
     if _frame is None:
         return
     v = _frame.copy()
-    for n, (x1, y1, x2, y2) in boxes().items():
+    for n, (x1, y1, x2, y2) in (_active_boxes or boxes()).items():
         if n in _res:
             txt, col = "next", (0, 255, 255)
         elif _seen.get(n) == "free":
             txt, col = "free", (0, 255, 0)
+        elif _seen.get(n, "unknown") == "unknown":
+            txt, col = "unknown", (160, 160, 160)
         else:
             txt, col = "occupied", (0, 0, 255)
         cv.rectangle(v, (x1, y1), (x2, y2), col, 2)
@@ -507,7 +588,7 @@ def _draw():
 
 def _scan(n=3, wait=0.15, quiet=False, frac=None):
     """Compare a fresh frame with the reference. quiet=True prints only when a slot changes state."""
-    global _ref, _when
+    global _ref, _when, _active_boxes
     if _ref is None:
         _ref = cv.imread(REF)
         if _ref is None:
@@ -519,16 +600,29 @@ def _scan(n=3, wait=0.15, quiet=False, frac=None):
     if f.shape != _ref.shape:
         _warn("size", "[TRAY ERROR] Camera size changed. Calibrate.")
         return False
+    matrix = _align_reference(_ref, f)
+    active_boxes = _map_boxes(matrix, f.shape) if matrix is not None else None
+    if active_boxes is None:
+        _active_boxes = boxes()
+        for name in boxes():
+            _seen[name] = "unknown"
+        _when = time.time()
+        _draw()
+        _warn("align", "[TRAY ERROR] Could not confidently align tray to calibration; slot states are unknown.")
+        return False
+
+    _active_boxes = active_boxes
+    aligned_reference = cv.warpPerspective(_ref, matrix, (f.shape[1], f.shape[0]))
     limit = FRAC if frac is None else frac
     fh, fw = f.shape[:2]
     prev = dict(_seen)
     out = []
-    for name, (x1, y1, x2, y2) in boxes().items():
+    for name, (x1, y1, x2, y2) in _active_boxes.items():
         if not (0 <= x1 < x2 <= fw and 0 <= y1 < y2 <= fh):      # box sticks out of the picture: never trust it
             _seen[name] = "unknown"
             out.append(f"{name} unknown")
             continue
-        r = _diff(_ref[y1:y2, x1:x2], f[y1:y2, x1:x2])
+        r = _diff(aligned_reference[y1:y2, x1:x2], f[y1:y2, x1:x2])
         _seen[name] = "free" if r < limit else "occupied"
         out.append(f"{name} {_seen[name]} ({r:.0%})")
     if not quiet or any(prev.get(k) != v for k, v in _seen.items()):
@@ -557,7 +651,7 @@ def get_free_slots(thresh=None, rescan=False, max_age=None):
         else:
             ok = True
         if not ok:
-            return {}, None
+            return {n: _seen.get(n, "unknown") for n in boxes()}, _view
         return {n: _seen.get(n, "unknown") for n in boxes()}, _view
 
 
@@ -682,7 +776,7 @@ def _click(img):
 
 def calibrate():
     """Click slots, save reference."""
-    global _boxes, _ref, _when
+    global _boxes, _ref, _when, _active_boxes
     print("[TRAY] Keep tray empty and arm out of view.")
     img = _grab(1.5, 5)
     if img is None:
@@ -704,6 +798,7 @@ def calibrate():
         json.dump(cfg, f, indent=4)
     with _lock:
         _boxes, _ref, _when = cfg, ref, 0.0
+        _active_boxes = cfg
         _res.clear()
         _seen.clear()
         _miss.clear()
@@ -715,6 +810,39 @@ def calibrate():
     return True
 
 
+def refresh_reference():
+    """Capture a new empty-tray reference while keeping the saved slot boxes."""
+    global _ref, _when, _active_boxes
+    saved_boxes = boxes()
+    if not saved_boxes:
+        print("[TRAY ERROR] No saved slot boxes. Run full slot calibration first.")
+        return False
+
+    print("[TRAY] Capturing empty-tray reference; saved slot boxes will be kept.")
+    ref = _grab(1.5, 5)
+    if ref is None:
+        return False
+    h, w = ref.shape[:2]
+    for name, (x1, y1, x2, y2) in saved_boxes.items():
+        if not (0 <= x1 < x2 <= w and 0 <= y1 < y2 <= h):
+            print(f"[TRAY ERROR] Saved box '{name}' is outside the camera image; nothing saved.")
+            return False
+
+    os.makedirs(os.path.dirname(REF), exist_ok=True)
+    if not cv.imwrite(REF, ref):
+        print("[TRAY ERROR] Cannot save reference image.")
+        return False
+    with _lock:
+        _ref = ref
+        _when = 0.0
+        _active_boxes = saved_boxes
+        _res.clear()
+        _seen.clear()
+        _miss.clear()
+    print(f"[TRAY] Empty-tray reference refreshed; kept {len(saved_boxes)} saved slot boxes.")
+    return True
+
+
 calibrate_slots = calibrate
 
 
@@ -722,6 +850,13 @@ calibrate_slots = calibrate
 # STANDALONE: calibrate / live view
 # ===========================================================
 if __name__ == "__main__":
+    if "--refresh-reference" in sys.argv:
+        try:
+            done = refresh_reference()
+        finally:
+            close()
+            cv.destroyAllWindows()
+        sys.exit(0 if done else 1)
     if "--calibrate" in sys.argv:          # used by the YuMi panel's "Calibrate 2D" button: calibrate, then quit
         try:
             done = calibrate()

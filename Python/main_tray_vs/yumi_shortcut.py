@@ -10,6 +10,7 @@ Also: pause/resume, move home, speed slider, snapshot/record, arm view, F-key ho
 import datetime, hmac, json, math, os, queue, re, secrets, socket, subprocess, sys, threading, time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from config_loader import load_config
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 import requests
@@ -27,8 +28,9 @@ else:
     user32 = None
 
 # ------------------------------ CONFIG ------------------------------
-CONTROLLER_URL = "http://192.168.125.1"
-AUTH = HTTPDigestAuth("Zebastian", "robotics")
+_CFG = load_config()
+CONTROLLER_URL = _CFG["robot"]["rws_url"]
+AUTH = HTTPDigestAuth(_CFG["robot"]["rws_user"], _CFG["robot"]["rws_password"])
 HEADERS = {"Content-Type": "application/x-www-form-urlencoded;v=2.0", "Accept": "application/json"}
 MAIN_TRAY_FILE = "main_tray.py"
 TIMEOUT = 5
@@ -42,11 +44,11 @@ if os.name == "nt" and PYTHON_EXE.lower().endswith("pythonw.exe"):
         PYTHON_EXE = _console_py
 
 # --- main_tray.py start-up prompts ---
-# Prompt 1 "Run detection model v5, v5s, or v8?"          -> answered from the GUI dropdown
+# Prompt 1 "Run detection model v5, v5s, v8, or v11Z?"    -> answered from the GUI dropdown
 # Prompt 2 "Do you want to save the test protocol? (y/n)" -> always SAVE_PROTOCOL_ANSWER
 # (Saving the protocol asks more questions later, which a hidden console cannot answer.)
-DETECTION_MODELS = {"v5": "5", "v5s": "5s", "v8": "8"}   # GUI label -> typed answer
-DEFAULT_MODEL = "v5s"
+DETECTION_MODELS = {"v5": "5", "v5s": "5s", "v8": "8", "v11Z": "11"}   # GUI label -> typed answer
+DEFAULT_MODEL = "v5s" #v5s
 SAVE_PROTOCOL_ANSWER = "n"
 # True  = answers typed automatically, console hidden (output -> yumi_logs/main_tray.log)
 # False = old behaviour: main_tray.py opens in its own console and you type the answers (dropdown ignored)
@@ -429,6 +431,7 @@ class App:
         self.root, self.q = root, queue.Queue()
         self.cancel, self.quit = threading.Event(), threading.Event()
         self.vision, self.busy, self.run_t0, self.cur, self.spin = None, False, None, 0, 0
+        self.calibration_running = False
         self.vision_log = None
         self.cam_hwnd, self.cam_token = None, 0
         self.model_choice = DEFAULT_MODEL
@@ -501,8 +504,22 @@ class App:
         body.rowconfigure(0, weight=0)
         body.rowconfigure(1, weight=1)
 
-        left = tk.Frame(body, bg=BG)
-        left.grid(row=0, column=0, rowspan=2, sticky="nsew", padx=(0, 12))
+        left_panel = tk.Frame(body, bg=BG)
+        left_panel.grid(row=0, column=0, rowspan=2, sticky="nsew", padx=(0, 12))
+        left_panel.rowconfigure(0, weight=1)
+        left_panel.columnconfigure(0, weight=1)
+        left_panel.configure(width=180)
+        left_panel.grid_propagate(False)
+        self.left_canvas = tk.Canvas(left_panel, bg=BG, highlightthickness=0, borderwidth=0, width=180)
+        self.left_scrollbar = tk.Scrollbar(left_panel, orient="vertical", command=self.left_canvas.yview)
+        self.left_canvas.configure(yscrollcommand=self.left_scrollbar.set)
+        self.left_canvas.grid(row=0, column=0, sticky="nsew")
+        self.left_scrollbar.place(relx=1.0, rely=0, relheight=1.0, anchor="ne")
+        left = tk.Frame(self.left_canvas, bg=BG)
+        self.left_window = self.left_canvas.create_window((0, 0), window=left, anchor="nw")
+        left.bind("<Configure>", self.update_left_scrollregion)
+        self.left_canvas.bind("<Configure>", self.resize_left_content)
+        self.root.bind_all("<MouseWheel>", self.scroll_left_column, add="+")
         self.val = {}
         c = self.card(left, "CONTROLLER")
         for k in ("Mode", "Motors", "RAPID", "Mastership", "Running for"):
@@ -526,6 +543,7 @@ class App:
         self.b_pause = self.wide_button(c, "‖  PAUSE", BLUE, self.pause_resume)
         self.b_home = self.wide_button(c, "⌂  HOME", PANEL2, self.move_home)
         self.b_rvis = self.wide_button(c, "↻  RESTART VISION", PANEL2, self.restart_vision)
+        self.b_calibrate = self.wide_button(c, "▦  CALIBRATE TRAY", PANEL2, self.calibrate_tray)
         self.speed_lbl = tk.Label(c, text="Speed  —", font=("Segoe UI", 10), bg=PANEL, fg=MUTED, anchor="w")
         self.speed_lbl.pack(fill="x", pady=(8, 0))
         self.speed_var = tk.IntVar(value=100)
@@ -848,6 +866,22 @@ class App:
 
     def refresh_buttons(self):
         self.b_start.config(state="disabled" if self.busy else "normal", bg=PANEL2 if self.busy else GREEN)
+        self.b_calibrate.config(
+            state="disabled" if self.busy or self.calibration_running else "normal"
+        )
+
+    def update_left_scrollregion(self, _event=None):
+        self.left_canvas.configure(scrollregion=self.left_canvas.bbox("all"))
+
+    def resize_left_content(self, event):
+        self.left_canvas.itemconfigure(self.left_window, width=event.width)
+
+    def scroll_left_column(self, event):
+        x, y = self.left_canvas.winfo_rootx(), self.left_canvas.winfo_rooty()
+        if x <= event.x_root < x + self.left_canvas.winfo_width() and \
+                y <= event.y_root < y + self.left_canvas.winfo_height():
+            self.left_canvas.yview_scroll(int(-event.delta / 120), "units")
+            return "break"
 
     def poll_loop(self):
         y, n = Yumi(), 0
@@ -904,6 +938,65 @@ class App:
     def stop_vision_click(self):
         threading.Thread(target=self.kill_vision, daemon=True).start()
 
+    def calibrate_tray(self):
+        if self.busy or self.calibration_running:
+            return
+        if not messagebox.askokcancel(
+            "Calibrate tray camera",
+            "Before continuing:\n"
+            "• Stop the robot and make sure it will not move.\n"
+            "• Empty the tray and move the arm completely out of the camera view.\n\n"
+            "This refreshes the empty-tray reference and keeps your saved slot boxes. "
+            "If no boxes have been saved yet, it opens the full box-drawing calibration. "
+            "Vision will stop first; restart it after calibration completes.",
+        ):
+            return
+        self.calibration_running = True
+        self.refresh_buttons()
+        self.log("Stopping vision before tray-camera calibration …", "cyan")
+        threading.Thread(target=self.calibrate_tray_worker, daemon=True).start()
+
+    def calibrate_tray_worker(self):
+        try:
+            robot_state = Yumi().execstate().lower()
+            if not robot_state.startswith("stop"):
+                raise RuntimeError(
+                    f"RAPID state is '{robot_state}'; stop the robot before calibrating."
+                )
+            self.kill_vision()
+            path = os.path.join(HERE, "tray_camera.py")
+            if not os.path.isfile(path):
+                raise RuntimeError(f"tray_camera.py not found in {HERE}")
+            slot_config = os.path.join(HERE, "slot_config.json")
+            calibration_mode = "--refresh-reference" if os.path.isfile(slot_config) else "--calibrate"
+            flags = subprocess.CREATE_NEW_CONSOLE if os.name == "nt" else 0
+            result = subprocess.run(
+                [PYTHON_EXE, path, calibration_mode],
+                cwd=HERE,
+                creationflags=flags,
+                check=False,
+            )
+            if result.returncode == 0:
+                self.log("Tray reference updated; saved slot boxes kept. Restart vision when ready.", "ok")
+            else:
+                self.log(
+                    f"Tray calibration did not complete (exit {result.returncode}); "
+                    "check the calibration window.",
+                    "warn",
+                )
+        except Exception as e:
+            self.log(f"Tray calibration failed: {e}", "err")
+            self.q.put(("calibration_error", str(e)))
+        finally:
+            self.q.put(("calibration_done", None))
+
+    def on_calibration_done(self, _):
+        self.calibration_running = False
+        self.refresh_buttons()
+
+    def on_calibration_error(self, message):
+        messagebox.showerror("Tray calibration failed", message)
+
     def kill_vision(self):
         if os.path.exists(REC_FLAG):                 # let main_tray.py close the video file first
             try:
@@ -918,6 +1011,9 @@ class App:
                 p.wait(3)
             except subprocess.TimeoutExpired:
                 p.kill()
+                p.wait(3)
+            if p.poll() is None:
+                raise RuntimeError(f"Vision process {p.pid} is still running.")
             self.log("Vision (main_tray.py) stopped", "warn")
         self.vision = None
         if self.vision_log:

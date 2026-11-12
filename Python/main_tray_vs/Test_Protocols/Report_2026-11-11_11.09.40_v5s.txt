@@ -1,0 +1,47 @@
+================================================================================
+                 ABB YuMi VISION & PICK-AND-PLACE TEST REPORT
+================================================================================
+Run ID / Start Time       : 2026-11-11 11:09:40
+
+--- 1. DETECTION MODEL & PIPELINE CONFIGURATION ---
+Model Selected            : v5s
+Model Blob File           : best.blob
+Network Input Resolution  : 416x416
+Confidence Threshold      : 0.5
+IoU Threshold             : 0.5
+Model Classes (7)         : ['Back', 'Front', 'Gripper', 'left_side', 'right_side', 'upright', 'upside_down']
+Flicker Filter Window     : 5 consecutive frames
+Same-Cup Distance Gate    : 40.0 mm
+
+--- 2. HAND-EYE CALIBRATION & WORKSPACE CONFIGURATION ---
+Active HT Matrix          : raw / HT_New_Run2_Mean
+Linear X Compensation     : robot_x = 1.401822 * ht_x - 198.521143 mm
+Grasp Z Heights           : Upward=55.0 mm | Downward=45.0 mm
+Dishwasher Slot Source    : camera
+Calibration Dataset Pairs : 79
+SVD Rigid Fit 3D RMS Error: 112.589 mm
+SVD Per-Axis RMSE (X,Y,Z) : [13.29, 57.63, 95.80] mm
+Table Cup XY Error (n=9) : RMS=9.72 mm | Mean=9.14 mm | Max=15.68 mm (RMSE X=6.56 mm, Y=7.17 mm)
+
+================================================================================
+                         3. PER-CUP EXECUTION LOG
+================================================================================
+
+--- Cup #1 [2026-11-11 11:09:47] ---
+  Detection & Vision Lock : Label='upright' | Confidence=95.0% | NN Latency=471.1 ms | NN FPS=156.9
+  5-Frame Acquisition     : Lock Time=0.025 s | Frames Inspected=5 | Window Resets=0 (Label Flicker=0, Pos Jump=0)
+  Camera Coordinates (mm) : Median=[-87.54, -40.39, 484.68] | Distance=494.2 mm
+  5-Frame 3D Jitter (mm)  : Range dXYZ=[0.0, 0.81, 0.0] (Norm=0.81 mm) | Std sXYZ=[0.0, 0.44, 0.0]
+  Robot Target (mm)       : XYZ=[332.24, 96.24, 55.0] | Normal=[0.0, 0.0, 1.0]
+  Dishwasher Target Slot  : 'slot_2' @ [634.0, -258.0, 201.0] mm
+  Grasp Execution         : Attempts=1 (First-Try Success=True, Retries=0)
+  2D Tray Verification    : Skipped (Fixed Mode) (Polls=10)
+  Timing Breakdown (s)    :
+    - Slot Selection      : 0.554 s
+    - Move Home           : 0.053 s
+    - Left Pick+Handover  : 8.054 s
+    - Right Tray Place    : 2.199 s
+    - Robot Sequence Total: 10.253 s
+    - 2D Tray Verification: 10.011 s
+    - TOTAL CYCLE TIME    : 20.870 s
+

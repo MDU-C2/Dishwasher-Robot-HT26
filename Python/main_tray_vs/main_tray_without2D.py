@@ -354,9 +354,22 @@ def local_move(orient, client, target_xyz, normalized_vector, save_protocol, fil
 
 def choose_detection_model():
     """Ask once which copied detection package to load."""
-    model_by_input = {"5": "v5", "5s": "v5s", "8": "v8"}
+    model_by_input = {
+        "5": "v5",
+        "v5": "v5",
+        "5s": "v5s",
+        "v5s": "v5s",
+        "8": "v8",
+        "v8": "v8",
+        "11": "v11z",
+        "11z": "v11z",
+        "11s": "v11z",
+        "v11": "v11z",
+        "v11z": "v11z",
+        "v11s": "v11z",
+    }
     while True:
-        choice = input("Run detection model v5, v5s, or v8? Enter 5, 5s, or 8: ").strip().lower()
+        choice = input("Run detection model v5, v5s, v8, or v11Z? Enter 5, 5s, 8, or 11: ").strip().lower()
         model = model_by_input.get(choice)
         if model is not None:
             print(f"[MODEL] Selected {model}.")
@@ -387,6 +400,9 @@ def run():
     def find_empty_slot_in_dishwasher():
         """Dynamic callback triggered when RAPID sends 'Ask_LeavePosition'."""
         try:
+            if client.FreeSlot is not None:
+                print(f"[DYNAMIC TRAY] Returning pre-cached slot coordinates: {client.FreeSlot}")
+                return list(client.FreeSlot)
             chosen_slot, coords = select_placement_slot()
             if coords is None:
                 print("[DYNAMIC TRAY] WARNING: No placement slot.")
@@ -409,6 +425,7 @@ def run():
                       "Slot lookup will fail until it is fixed.")
 
         homogeneous, syncNN, pipeline, labels, rotation_matrix, translation_vector, camera_points, robot_points = cs.camera_setup(cam_coords, robot_file, model_choice)
+        model_info = cs.load_detection_model(model_choice)
 
  #       rotation_matrix = np.array([
  #           [0.007144178280750622, -0.40899573676986206, 0.9125083276446139],
@@ -569,7 +586,7 @@ def run():
 
                 frame = in_rgb.getCvFrame() # OpenCV BGR frame from color camera
                 depth_frame = in_depth.getFrame() # Depth data in millimeters
-                detections = in_dets.detections # List of spatial detections
+                detections = cs.extract_detections(in_dets, in_depth, device, model_info) # List of spatial detections
                 selected_target = select_nearest_target(detections, labels)
 
                 # The first packet is only for focus and is not part of the 5-frame window.

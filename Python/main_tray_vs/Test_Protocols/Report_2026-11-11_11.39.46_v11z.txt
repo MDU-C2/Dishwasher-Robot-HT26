@@ -1,0 +1,65 @@
+================================================================================
+                 ABB YuMi VISION & PICK-AND-PLACE TEST REPORT
+================================================================================
+Run ID / Start Time       : 2026-11-11 11:39:46
+
+--- 1. DETECTION MODEL & PIPELINE CONFIGURATION ---
+Model Selected            : v11z
+Model Blob File           : v11Z.blob
+Network Input Resolution  : 640x640
+Confidence Threshold      : 0.5
+IoU Threshold             : 0.5
+Model Classes (7)         : ['Back', 'Front', 'Gripper', 'left_side', 'right_side', 'upright', 'upside_down']
+Flicker Filter Window     : 5 consecutive frames
+Same-Cup Distance Gate    : 40.0 mm
+
+--- 2. HAND-EYE CALIBRATION & WORKSPACE CONFIGURATION ---
+Active HT Matrix          : raw / HT_New_Run2_Mean
+Linear X Compensation     : robot_x = 1.401822 * ht_x - 198.521143 mm
+Grasp Z Heights           : Upward=55.0 mm | Downward=45.0 mm
+Dishwasher Slot Source    : camera
+Calibration Dataset Pairs : 79
+SVD Rigid Fit 3D RMS Error: 112.589 mm
+SVD Per-Axis RMSE (X,Y,Z) : [13.29, 57.63, 95.80] mm
+Table Cup XY Error (n=9) : RMS=9.72 mm | Mean=9.14 mm | Max=15.68 mm (RMSE X=6.56 mm, Y=7.17 mm)
+
+================================================================================
+                         3. PER-CUP EXECUTION LOG
+================================================================================
+
+--- Cup #1 [2026-11-11 11:39:58] ---
+  Detection & Vision Lock : Label='upside_down' | Confidence=73.0% | NN Latency=2048.6 ms | NN FPS=18.2
+  5-Frame Acquisition     : Lock Time=1.223 s | Frames Inspected=5 | Window Resets=0 (Label Flicker=0, Pos Jump=0)
+  Camera Coordinates (mm) : Median=[-97.6, 2.89, 578.78] | Distance=587.0 mm
+  5-Frame 3D Jitter (mm)  : Range dXYZ=[1.36, 1.72, 3.51] (Norm=4.14 mm) | Std sXYZ=[0.56, 0.7, 1.47]
+  Robot Target (mm)       : XYZ=[430.35, 105.61, 45.0] | Normal=[0.0, 0.0, -1.0]
+  Dishwasher Target Slot  : 'slot_1' @ [600.0, -460.0, 162.0] mm
+  Grasp Execution         : Attempts=1 (First-Try Success=True, Retries=0)
+  2D Tray Verification    : Verified (True) (Polls=1)
+  Timing Breakdown (s)    :
+    - Slot Selection      : 0.570 s
+    - Move Home           : 0.056 s
+    - Left Pick+Handover  : 18.233 s
+    - Right Tray Place    : 2.473 s
+    - Robot Sequence Total: 20.706 s
+    - 2D Tray Verification: 0.964 s
+    - TOTAL CYCLE TIME    : 22.296 s
+
+--- Cup #2 [2026-11-11 11:40:45] ---
+  Detection & Vision Lock : Label='upside_down' | Confidence=61.0% | NN Latency=1940.9 ms | NN FPS=8.9
+  5-Frame Acquisition     : Lock Time=7.320 s | Frames Inspected=5 | Window Resets=0 (Label Flicker=0, Pos Jump=0)
+  Camera Coordinates (mm) : Median=[-241.84, 43.83, 654.16] | Distance=698.8 mm
+  5-Frame 3D Jitter (mm)  : Range dXYZ=[3.59, 0.62, 6.64] (Norm=7.57 mm) | Std sXYZ=[1.62, 0.22, 2.85]
+  Robot Target (mm)       : XYZ=[506.04, 249.26, 45.0] | Normal=[0.0, 0.0, -1.0]
+  Dishwasher Target Slot  : 'slot_3' @ [665.0, -412.0, 240.0] mm
+  Grasp Execution         : Attempts=1 (First-Try Success=True, Retries=0)
+  2D Tray Verification    : Skipped (Fixed Mode) (Polls=10)
+  Timing Breakdown (s)    :
+    - Slot Selection      : 0.613 s
+    - Move Home           : 0.052 s
+    - Left Pick+Handover  : 8.275 s
+    - Right Tray Place    : 2.266 s
+    - Robot Sequence Total: 10.541 s
+    - 2D Tray Verification: 10.137 s
+    - TOTAL CYCLE TIME    : 21.344 s
+

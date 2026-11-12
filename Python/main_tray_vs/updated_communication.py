@@ -3,7 +3,7 @@ import time
 import ast
 import threading
 import cv2 as cv
-# from pynput import mouse
+from config_loader import load_config
 lock = threading.Lock()
 
 class Communication():
@@ -18,8 +18,9 @@ class Communication():
         self._mutex_variable = threading.Lock()  #mutex for accessing variables
         self._mutex_function = threading.Lock()  #mutex for accessing functions
         self.socket = None
-        self.port = 1025
-        self.host = '192.168.125.1'
+        self.config = load_config()
+        self.port = int(self.config["robot"]["socket_port"])
+        self.host = str(self.config["robot"]["ip"])
         self.connected = False
 
 
@@ -69,6 +70,15 @@ class Communication():
         self.Robotorientation = [1,0,0,0] # Robot hand orientation, unused?
         self.MugNormal = [0,0,1]
         self.FreeSlot = None  # [x, y, z] in robot frame; set by main.py before each placement
+        self.LatestMugCoordinates = None
+        self.LatestMugNormal = None
+        self.pick_attempt_count = 0
+        self.retry_history = []
+        self.last_pick_start_time = None
+        self.last_handover_timestamp = None
+        self.last_pick_end_time = None
+        self.last_left_arm_time_s = 0.0
+        self.last_right_arm_time_s = 0.0
 
         # self._connection_test_thread = threading.Thread(target=self._keep_connection_alive, daemon=True)
         # self._connection_test_thread.start()
@@ -107,6 +117,19 @@ class Communication():
 
                 case askmug_coordinates if askmug_coordinates in self.ASKMUGCOORDINATES: # RAPID wants mug coordinates
                     with self._mutex_variable:  # Lock mutex for thread-safe access
+                        self.pick_attempt_count += 1
+                        if self.pick_attempt_count > 1 and self.LatestMugCoordinates is not None:
+                            print(f"[RETRY #{self.pick_attempt_count}] Grasp miss detected! Refreshing mug coordinates from live camera:")
+                            print(f"         Previous: {self.MugCoordinates}")
+                            print(f"         Fresh:    {self.LatestMugCoordinates}")
+                            self.retry_history.append({
+                                "attempt": self.pick_attempt_count,
+                                "previous_xyz": list(self.MugCoordinates),
+                                "fresh_xyz": list(self.LatestMugCoordinates),
+                            })
+                            self.MugCoordinates = list(self.LatestMugCoordinates)
+                            if self.LatestMugNormal is not None:
+                                self.MugNormal = list(self.LatestMugNormal)
                         self._send_message(str(self.MugCoordinates)) # Send mug coordinates
 
                 case askmug_orientation if askmug_orientation in self.ASKMUGORIENTATION: # RAPID wants mug orientation
@@ -123,6 +146,8 @@ class Communication():
 
                 case ask_free_slot if ask_free_slot in self.ASKFREESLOT: # RAPID wants a free tray slot position
                     with self._mutex_variable:
+                        if self.last_handover_timestamp is None:
+                            self.last_handover_timestamp = time.perf_counter()
                         if hasattr(self, 'get_free_slot_logic') and callable(self.get_free_slot_logic):
                             try:
                                 slot_coords = self.get_free_slot_logic()
@@ -228,7 +253,7 @@ class Communication():
             return None
 
         try:
-            self.socket.send(message.encode())
+            self.socket.sendall(message.encode())
             print(f"[SENT] {message}")
         except Exception as e:
             print(f"[ERROR] Send error: {e}")
@@ -330,8 +355,24 @@ class Communication():
                 self.MugCoordinates = list(coordinates)
                 self.MugOrientation = list(orientation)
                 self.MugNormal = list(normalized_vector)
+                self.pick_attempt_count = 0
+                self.retry_history = []
+                self.last_pick_start_time = time.perf_counter()
+                self.last_handover_timestamp = None
+                self.last_pick_end_time = None
+                self.last_left_arm_time_s = 0.0
+                self.last_right_arm_time_s = 0.0
             self._send_message("Pick_Up_Sequence")
             self._handle_response()
+            with self._mutex_variable:
+                self.last_pick_end_time = time.perf_counter()
+                total_seq = self.last_pick_end_time - self.last_pick_start_time
+                if self.last_handover_timestamp is not None:
+                    self.last_left_arm_time_s = self.last_handover_timestamp - self.last_pick_start_time
+                    self.last_right_arm_time_s = self.last_pick_end_time - self.last_handover_timestamp
+                else:
+                    self.last_left_arm_time_s = total_seq
+                    self.last_right_arm_time_s = 0.0
             return None
 
     def LeaveSequence(self, coordinates, orientation):
@@ -347,7 +388,10 @@ class Communication():
     def SetFreeSlot(self, slot_coords):
         """Store robot-frame [x, y, z] so RAPID can fetch it via Ask_LeavePosition."""
         with self._mutex_variable:
-            self.FreeSlot = [float(v) for v in slot_coords]
+            if slot_coords is None:
+                self.FreeSlot = None
+            else:
+                self.FreeSlot = [float(v) for v in slot_coords]
             print(f"[TRAY] Free slot set to: {self.FreeSlot}")
 
     def LeaveSequenceTray(self, slot_coords=None):

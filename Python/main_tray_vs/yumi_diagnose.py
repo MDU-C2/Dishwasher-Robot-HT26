@@ -13,9 +13,11 @@ import sys
 import time
 import requests
 from requests.auth import HTTPDigestAuth
+from config_loader import load_config
 
-URL = "http://192.168.125.1"
-AUTH = HTTPDigestAuth("Zebastian", "robotics")
+_CFG = load_config()
+URL = _CFG["robot"]["rws_url"]
+AUTH = HTTPDigestAuth(_CFG["robot"]["rws_user"], _CFG["robot"]["rws_password"])
 HEADERS = {
     "Content-Type": "application/x-www-form-urlencoded;v=2.0",
     "Accept": "application/json",
