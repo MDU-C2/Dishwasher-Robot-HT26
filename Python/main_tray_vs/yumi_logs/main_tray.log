@@ -1,188 +1,65 @@
 Run detection model v5, v5s, v8, or v11Z? Enter 5, 5s, 8, or 11: [MODEL] Selected v5s.
+Run 2D tray detection with YOLO or Normal Thresholding? Enter y (yolo) or t (threshold) [default=yolo]: [TRAY MODE] Selected YOLO (best.pt).
+[TRAY] 5 camera slot(s), 15 robot coordinate(s).
+[TRAY] Camera 1 ready in 2.1s
+[TRAY YOLO WARNING] Model file not found at: E:\10-23\main_tray_vs\best.pt. Falling back to image diff.
+[SCAN-YOLO] slot_1 free (7%), slot_2 free (2%), slot_3 free (1%), slot_4 free (0%), slot_5 free (2%)
+[SCAN-YOLO] slot_1 free (7%), slot_2 free (2%), slot_3 free (1%), slot_4 free (0%), slot_5 free (2%)
 [INFO] Connected to RAPID server at 192.168.125.1:1025
-[TRAY] Loaded 5 slot coordinates from 'slot_positions.json'.
+[SENT] Home
+[RECEIVED] Ask_next
 [MODEL] v5s  input 416x416
 [MODEL] config: E:\10-23\main_tray_vs\blob_v5s\config_legacy.json
 [MODEL] blob: E:\10-23\main_tray_vs\blob_v5s\best.blob
 {'classes': 7, 'coordinates': 4, 'anchors': [10.0, 13.0, 16.0, 30.0, 33.0, 23.0, 30.0, 61.0, 62.0, 45.0, 59.0, 119.0, 116.0, 90.0, 156.0, 198.0, 373.0, 326.0], 'anchor_masks': {'side52': [0, 1, 2], 'side26': [3, 4, 5], 'side13': [6, 7, 8]}, 'iou_threshold': 0.5, 'confidence_threshold': 0.5}
 [DEPTH] mono=400P  ExtendedDisparity=True  Subpixel=False
+[MODEL] Raw YOLO output tensor detected for v5s -> using host-side YOLO11/v8 decoder + spatial depth calculator.
 [HT] active raw / HT_New_Run2_Mean. Y unchanged.
 [HT] x_compensate: y = 1.401822 * x - 198.521
 [HT] Z Heights: Upward=55.0 mm, Downward=45.0 mm
-Do you want to save the test protocol? (y/n): [REPORT] Logging all metrics to: Test_Protocols\Report_2026-11-11_14.42.27_v5s.txt
-[1944301011FF704800] [1.5] [0.930] [SpatialDetectionNetwork(4)] [warning] Network compiled for 5 shaves, maximum available 12, compiling for 6 shaves likely will yield in better performance
-[TRAY] Opening camera 1...
-[TRAY] Camera ready in 2.0s
-[SCAN] slot_1 free (0%), slot_2 free (0%), slot_3 free (0%), slot_4 free (0%), slot_5 free (0%)
-[FRAME] 1/5 upright camera XYZ mm: -119.2, -15.2, 536.6
-[FRAME] 2/5 upright camera XYZ mm: -119.2, -15.2, 536.6
-[FRAME] 3/5 upright camera XYZ mm: -119.2, -14.3, 536.6
-[FRAME] 4/5 upright camera XYZ mm: -119.2, -15.2, 536.6
+Do you want to save the test protocol? (y/n): [REPORT] Logging all metrics to: Test_Protocols\Report_2026-11-13_14.53.32_v5s.txt
+[1944301011FF704800] [1.5] [0.991] [NeuralNetwork(4)] [warning] Number of inference threads assigned for network is 1, assigning 2 will likely yield in better performance
+[FRAME] 1/5 upside_down camera XYZ mm: -688.7, 181.8, 2769.9
+[FRAME] Target changed. 5-frame window restarted.
+[FRAME] 1/5 upside_down camera XYZ mm: -479.4, 127.2, 1925.4
+[FRAME] Target changed. 5-frame window restarted.
+[FRAME] 1/5 upside_down camera XYZ mm: -532.8, 141.4, 2139.8
+[FRAME] Target changed. 5-frame window restarted.
+[FRAME] 1/5 upside_down camera XYZ mm: -623.4, 165.4, 2511.2
+[FRAME] Target changed. 5-frame window restarted.
+[FRAME] 1/5 upside_down camera XYZ mm: -189.4, 50.3, 761.7
+[FRAME] Target changed. 5-frame window restarted.
+[FRAME] 1/5 upright camera XYZ mm: 86.7, -47.0, 472.9
+[FRAME] Target changed. 5-frame window restarted.
+[FRAME] 1/5 upright camera XYZ mm: -17.4, 2.6, 580.8
+[FRAME] Target changed. 5-frame window restarted.
+[FRAME] 1/5 upside_down camera XYZ mm: -158.0, 41.7, 642.6
+[FRAME] 2/5 upside_down camera XYZ mm: -157.2, 41.3, 643.1
+[FRAME] 3/5 upside_down camera XYZ mm: -156.1, 42.5, 641.0
+[FRAME] 4/5 upside_down camera XYZ mm: -156.3, 42.8, 640.0
 [FRAME] 5/5 ready. Automatic pick will send the median.
-[AUTO] Next mug from 5 frames (upright, 96%)
-[HT] median camera XYZ mm: -119.2, -15.2, 536.6
-[HT] 5-frame range mm: 0.0, 0.9, 0.0
-[HT] robot XYZ mm (compensated X, fixed Z=55.0): [385.77, 127.47, 55.0]
-[SCAN] slot_1 free (0%), slot_2 free (0%), slot_3 free (0%), slot_4 free (0%), slot_5 free (0%)
-[TRAY] Source=camera  states: {'slot_1': 'free', 'slot_2': 'free', 'slot_3': 'free', 'slot_4': 'free', 'slot_5': 'free'}
-[TRAY] Source=camera  slot 'slot_1' @ [600, -460, 162]
-[TRAY] Free slot set to: [600.0, -460.0, 162.0]
-[TRAY] FreeSlot stored: [600.0, -460.0, 162.0]
-[SENT] Home
-[RECEIVED] Ask_next
+[AUTO] Next mug from 5 frames (upside_down, 89%)
+[HT] median camera XYZ mm: -157.2, 42.5, 641.0
+[HT] 5-frame range mm: 1.9, 1.5, 4.5
+[HT] robot XYZ mm (compensated X, fixed Z=45.0): [489.48, 164.65, 45.0]
+[TRAY] Free slot set to: None
 [ROBOT] Starting PickUpSequence...
 [SENT] Pick_Up_Sequence
 [RECEIVED] Ask_Coordinate
-[SENT] [385.77, 127.47, 55.0]
+[SENT] [489.48, 164.65, 45.0]
 [RECEIVED] Ack_Coordinate
 [RECEIVED] Ask_MugNormal
-[SENT] [0.0, 0.0, 1.0]
-[RECEIVED] Ask_Coordinate
-[RETRY #2] Grasp miss detected! Refreshing mug coordinates from live camera:
-         Previous: [385.77, 127.47, 55.0]
-         Fresh:    [386.24, 124.3, 55.0]
-[SENT] [386.24, 124.3, 55.0]
-[RECEIVED] Ack_Coordinate
-[RECEIVED] Ask_MugNormal
-[SENT] [0.0, 0.0, 1.0]
-[RECEIVED] Ask_Coordinate
-[RETRY #3] Grasp miss detected! Refreshing mug coordinates from live camera:
-         Previous: [386.24, 124.3, 55.0]
-         Fresh:    [385.78, 130.65, 55.0]
-[SENT] [385.78, 130.65, 55.0]
-[RECEIVED] Ack_Coordinate
-[RECEIVED] Ask_MugNormal
-[SENT] [0.0, 0.0, 1.0]
-[RECEIVED] Ask_next
-[ROBOT] PickUpSequence completed. Robot Cycle Time: 14.07 s
-[TRAY] Grasp failed (handover aborted) - skipping dishwasher verification.
-[FRAME] 1/5 upright camera XYZ mm: -123.9, -15.2, 536.6
-[FRAME] 2/5 upright camera XYZ mm: -123.9, -15.2, 536.6
-[FRAME] 3/5 upright camera XYZ mm: -125.5, -15.2, 536.6
-[FRAME] 4/5 upright camera XYZ mm: -125.5, -15.2, 536.6
-[FRAME] 5/5 ready. Automatic pick will send the median.
-[AUTO] Next mug from 5 frames (upright, 88%)
-[HT] median camera XYZ mm: -125.5, -15.2, 536.6
-[HT] 5-frame range mm: 1.6, 0.0, 0.0
-[HT] robot XYZ mm (compensated X, fixed Z=55.0): [385.79, 133.82, 55.0]
-[SCAN] slot_1 free (0%), slot_2 free (0%), slot_3 free (0%), slot_4 free (0%), slot_5 free (0%)
-[TRAY] Source=camera  states: {'slot_1': 'free', 'slot_2': 'free', 'slot_3': 'free', 'slot_4': 'free', 'slot_5': 'free'}
-[TRAY] Source=camera  slot 'slot_1' @ [600, -460, 162]
+[SENT] [0.0, 0.0, -1.0]
+[SCAN-YOLO] slot_1 free (7%), slot_2 free (2%), slot_3 free (1%), slot_4 free (0%), slot_5 free (2%)
+[TRAY] Slot 'slot_1' reserved @ [600.0, -460.0, 162.0]  |  next free: slot_2
+[TRAY] Source=camera (YOLO)  slot 'slot_1' @ [600.0, -460.0, 162.0]
 [TRAY] Free slot set to: [600.0, -460.0, 162.0]
 [TRAY] FreeSlot stored: [600.0, -460.0, 162.0]
-[SENT] Home
-[RECEIVED] Ask_next
-[ROBOT] Starting PickUpSequence...
-[SENT] Pick_Up_Sequence
-[RECEIVED] Ask_Coordinate
-[SENT] [385.79, 133.82, 55.0]
-[RECEIVED] Ack_Coordinate
-[RECEIVED] Ask_MugNormal
-[SENT] [0.0, 0.0, 1.0]
 [RECEIVED] Ask_Coordinate
 [RETRY #2] Grasp miss detected! Refreshing mug coordinates from live camera:
-         Previous: [385.79, 133.82, 55.0]
-         Fresh:    [398.56, 137.68, 55.0]
-[SENT] [398.56, 137.68, 55.0]
-[RECEIVED] Ack_Coordinate
-[RECEIVED] Ask_MugNormal
-[SENT] [0.0, 0.0, 1.0]
-[RECEIVED] Ask_Coordinate
-[RETRY #3] Grasp miss detected! Refreshing mug coordinates from live camera:
-         Previous: [398.56, 137.68, 55.0]
-         Fresh:    [408.23, 128.46, 55.0]
-[SENT] [408.23, 128.46, 55.0]
-[RECEIVED] Ack_Coordinate
-[RECEIVED] Ask_MugNormal
-[SENT] [0.0, 0.0, 1.0]
-[RECEIVED] Ask_next
-[ROBOT] PickUpSequence completed. Robot Cycle Time: 14.68 s
-[TRAY] Grasp failed (handover aborted) - skipping dishwasher verification.
-[FRAME] 1/5 upright camera XYZ mm: -102.4, -24.6, 567.0
-[FRAME] 2/5 upright camera XYZ mm: -102.2, -3.7, 556.5
-[FRAME] 3/5 upright camera XYZ mm: -108.4, -7.3, 546.4
-[FRAME] 4/5 upright camera XYZ mm: -108.0, -9.8, 536.6
-[FRAME] 5/5 ready. Automatic pick will send the median.
-[AUTO] Next mug from 5 frames (upright, 96%)
-[HT] median camera XYZ mm: -108.0, -8.9, 546.4
-[HT] 5-frame range mm: 7.5, 20.9, 30.4
-[HT] robot XYZ mm (compensated X, fixed Z=55.0): [394.93, 116.27, 55.0]
-[SCAN] slot_1 free (0%), slot_2 free (0%), slot_3 free (0%), slot_4 free (0%), slot_5 free (0%)
-[TRAY] Source=camera  states: {'slot_1': 'free', 'slot_2': 'free', 'slot_3': 'free', 'slot_4': 'free', 'slot_5': 'free'}
-[TRAY] Source=camera  slot 'slot_1' @ [600, -460, 162]
-[TRAY] Free slot set to: [600.0, -460.0, 162.0]
-[TRAY] FreeSlot stored: [600.0, -460.0, 162.0]
-[SENT] Home
-[RECEIVED] Ask_next
-[ROBOT] Starting PickUpSequence...
-[SENT] Pick_Up_Sequence
-[RECEIVED] Ask_Coordinate
-[SENT] [394.93, 116.27, 55.0]
-[RECEIVED] Ack_Coordinate
-[RECEIVED] Ask_MugNormal
-[SENT] [0.0, 0.0, 1.0]
-[RECEIVED] Ask_Coordinate
-[RETRY #2] Grasp miss detected! Refreshing mug coordinates from live camera:
-         Previous: [394.93, 116.27, 55.0]
-         Fresh:    [410.22, 120.24, 55.0]
-[SENT] [410.22, 120.24, 55.0]
-[RECEIVED] Ack_Coordinate
-[RECEIVED] Ask_MugNormal
-[SENT] [0.0, 0.0, 1.0]
-[RECEIVED] Ask_Coordinate
-[RETRY #3] Grasp miss detected! Refreshing mug coordinates from live camera:
-         Previous: [410.22, 120.24, 55.0]
-         Fresh:    [392.46, 92.33, 55.0]
-[SENT] [392.46, 92.33, 55.0]
-[RECEIVED] Ack_Coordinate
-[RECEIVED] Ask_MugNormal
-[SENT] [0.0, 0.0, 1.0]
-[RECEIVED] Ask_next
-[ROBOT] PickUpSequence completed. Robot Cycle Time: 39.08 s
-[TRAY] Grasp failed (handover aborted) - skipping dishwasher verification.
-[FRAME] 1/5 upright camera XYZ mm: -29.7, -46.1, 477.0
-[FRAME] 2/5 upright camera XYZ mm: -31.1, -46.1, 477.0
-[FRAME] 3/5 upright camera XYZ mm: -31.1, -45.3, 477.0
-[FRAME] 4/5 upright camera XYZ mm: -31.1, -45.3, 477.0
-[FRAME] 5/5 ready. Automatic pick will send the median.
-[AUTO] Next mug from 5 frames (upright, 96%)
-[HT] median camera XYZ mm: -31.1, -45.3, 477.0
-[HT] 5-frame range mm: 1.4, 0.8, 0.0
-[HT] robot XYZ mm (compensated X, fixed Z=55.0): [324.76, 39.83, 55.0]
-[SCAN] slot_1 free (0%), slot_2 free (0%), slot_3 free (0%), slot_4 free (0%), slot_5 free (0%)
-[TRAY] Source=camera  states: {'slot_1': 'free', 'slot_2': 'free', 'slot_3': 'free', 'slot_4': 'free', 'slot_5': 'free'}
-[TRAY] Source=camera  slot 'slot_1' @ [600, -460, 162]
-[TRAY] Free slot set to: [600.0, -460.0, 162.0]
-[TRAY] FreeSlot stored: [600.0, -460.0, 162.0]
-[SENT] Home
-[RECEIVED] Ask_next
-[ROBOT] Starting PickUpSequence...
-[SENT] Pick_Up_Sequence
-[RECEIVED] Ask_Coordinate
-[SENT] [324.76, 39.83, 55.0]
-[RECEIVED] Ack_Coordinate
-[RECEIVED] Ask_MugNormal
-[SENT] [0.0, 0.0, 1.0]
-[RECEIVED] Ask_Coordinate
-[RETRY #2] Grasp miss detected! Refreshing mug coordinates from live camera:
-         Previous: [324.76, 39.83, 55.0]
-         Fresh:    [322.07, 11.57, 55.0]
-[SENT] [322.07, 11.57, 55.0]
-[RECEIVED] Ack_Coordinate
-[RECEIVED] Ask_MugNormal
-[SENT] [0.0, 0.0, 1.0]
-[RECEIVED] Ask_Coordinate
-[RETRY #3] Grasp miss detected! Refreshing mug coordinates from live camera:
-         Previous: [322.07, 11.57, 55.0]
-         Fresh:    [261.56, 194.56, 45.0]
-[SENT] [261.56, 194.56, 45.0]
+         Previous: [489.48, 164.65, 45.0]
+         Fresh:    [330.34, 284.87, 45.0]
+[SENT] [330.34, 284.87, 45.0]
 [RECEIVED] Ack_Coordinate
 [RECEIVED] Ask_MugNormal
 [SENT] [0.999985426256925, -0.005398821515471368, 0.0]
-
-==============================================================================
-[REPORT SAVED] Full Visual Report : E:\10-23\main_tray_vs\Test_Protocols\Report_2026-11-11_14.42.27_v5s.txt
-[REPORT SAVED] Per-Cup CSV Table  : E:\10-23\main_tray_vs\Test_Protocols\Report_Cups_Log.csv
-[REPORT SAVED] Model Summary CSV  : E:\10-23\main_tray_vs\Test_Protocols\Report_Runs_Summary.csv
-==============================================================================
-

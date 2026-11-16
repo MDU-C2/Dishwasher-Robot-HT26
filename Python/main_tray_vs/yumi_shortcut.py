@@ -45,10 +45,13 @@ if os.name == "nt" and PYTHON_EXE.lower().endswith("pythonw.exe"):
 
 # --- main_tray.py start-up prompts ---
 # Prompt 1 "Run detection model v5, v5s, v8, or v11Z?"    -> answered from the GUI dropdown
-# Prompt 2 "Do you want to save the test protocol? (y/n)" -> always SAVE_PROTOCOL_ANSWER
+# Prompt 2 "Run 2D tray detection with YOLO or Normal Thresholding?" -> answered from the 2D Tray mode dropdown
+# Prompt 3 "Do you want to save the test protocol? (y/n)" -> always SAVE_PROTOCOL_ANSWER
 # (Saving the protocol asks more questions later, which a hidden console cannot answer.)
 DETECTION_MODELS = {"v5": "5", "v5s": "5s", "v8": "8", "v11Z": "11"}   # GUI label -> typed answer
 DEFAULT_MODEL = "v5s" #v5s
+TRAY_MODES = {"YOLO": "yolo", "Threshold": "threshold"}                 # 2D Tray GUI label -> typed answer
+DEFAULT_TRAY_MODE = "YOLO"
 SAVE_PROTOCOL_ANSWER = "n"
 # True  = answers typed automatically, console hidden (output -> yumi_logs/main_tray.log)
 # False = old behaviour: main_tray.py opens in its own console and you type the answers (dropdown ignored)
@@ -435,6 +438,7 @@ class App:
         self.vision_log = None
         self.cam_hwnd, self.cam_token = None, 0
         self.model_choice = DEFAULT_MODEL
+        self.tray_mode_choice = DEFAULT_TRAY_MODE
         self.recording, self.rec_t0 = False, 0.0
         self.speed_drag, self.speed_hold = False, 0.0
         self.joint_data = {}
@@ -537,8 +541,16 @@ class App:
         self.model_combo = ttk.Combobox(mrow, textvariable=self.model_var, values=list(DETECTION_MODELS),
                                         state="readonly", width=7, font=("Consolas", 11, "bold"))
         self.model_combo.pack(side="right")
+        trow = tk.Frame(c, bg=PANEL)
+        trow.pack(fill="x", pady=2)
+        tk.Label(trow, text="2D Tray mode", font=("Segoe UI", 10), bg=PANEL, fg=MUTED).pack(side="left")
+        self.tray_mode_var = tk.StringVar(value=DEFAULT_TRAY_MODE)
+        self.tray_mode_combo = ttk.Combobox(trow, textvariable=self.tray_mode_var, values=list(TRAY_MODES),
+                                            state="readonly", width=9, font=("Consolas", 10, "bold"))
+        self.tray_mode_combo.pack(side="right")
         if not AUTO_ANSWER_PROMPTS:
             self.model_combo.config(state="disabled")
+            self.tray_mode_combo.config(state="disabled")
         c = self.card(left, "CONTROL")
         self.b_pause = self.wide_button(c, "‖  PAUSE", BLUE, self.pause_resume)
         self.b_home = self.wide_button(c, "⌂  HOME", PANEL2, self.move_home)
@@ -903,6 +915,7 @@ class App:
         if self.busy:
             return
         self.model_choice = self.model_var.get()      # read on the GUI thread
+        self.tray_mode_choice = self.tray_mode_var.get()
         self.cancel.clear()
         self.step_state = ["pending"] * len(STEPS)
         self.paint_steps()
@@ -1229,7 +1242,8 @@ class App:
             self.log("RAPID is not running - use START CELL (F5) first", "warn")
             return
         self.model_choice = self.model_var.get()
-        self.log(f"Restarting vision (model {self.model_choice}) …", "cyan")
+        self.tray_mode_choice = self.tray_mode_var.get()
+        self.log(f"Restarting vision (model {self.model_choice}, 2D tray {self.tray_mode_choice}) …", "cyan")
         threading.Thread(target=self.restart_vision_worker, daemon=True).start()
 
     def restart_vision_worker(self):
@@ -1494,15 +1508,19 @@ class App:
             except OSError:
                 pass
         if AUTO_ANSWER_PROMPTS:
-            answers = [DETECTION_MODELS[self.model_choice], SAVE_PROTOCOL_ANSWER]
+            tray_ans = TRAY_MODES.get(self.tray_mode_choice, "yolo")
+            answers = [DETECTION_MODELS[self.model_choice], tray_ans, SAVE_PROTOCOL_ANSWER]
+            env = os.environ.copy()
+            env["YUMI_GUI"] = "1"
+            env["TRAY_MODE"] = tray_ans
             flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
             self.vision_log = open(os.path.join(LOG_DIR, "main_tray.log"), "w", encoding="utf-8")
-            p = subprocess.Popen([PYTHON_EXE, "-u", path], cwd=HERE, stdin=subprocess.PIPE,
+            p = subprocess.Popen([PYTHON_EXE, "-u", path], cwd=HERE, env=env, stdin=subprocess.PIPE,
                                  stdout=self.vision_log, stderr=subprocess.STDOUT, text=True, creationflags=flags)
             for a in answers:
                 p.stdin.write(a + "\n")
             p.stdin.flush()
-            info = f"model {self.model_choice}, inputs {answers}, console hidden"
+            info = f"model {self.model_choice}, 2D tray {self.tray_mode_choice}, inputs {answers}, console hidden"
         else:
             flags = subprocess.CREATE_NEW_CONSOLE if os.name == "nt" else 0
             p = subprocess.Popen([PYTHON_EXE, path], cwd=HERE, creationflags=flags)

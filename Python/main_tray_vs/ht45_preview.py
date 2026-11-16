@@ -134,15 +134,24 @@ def compensated_robot_xyz(camera_xyz, row):
     return compensate_robot_x(point, row["x_slope"], row["x_intercept_mm"])
 
 
-def select_nearest_target(detections, labels):
-    """Nearest valid detection to the left-entry reference. Mug pose is not used."""
+def _is_ignored_label(label, cs=None):
+    """Return True when a detection class is not a pickable cup (e.g. 'handle' or 'Gripper')."""
+    if cs is not None:
+        return cs.is_ignored_detection_label(label)
+    return str(label).strip().lower() in {"handle", "gripper"}
+
+
+def select_nearest_target(detections, labels, cs=None):
+    """Nearest valid cup detection to the left-entry reference. Mug pose is not used."""
+    if cs is not None:
+        return cs.select_nearest_target(detections, labels, LEFT_ENTRY_CAMERA_XYZ_MM)
     reference = LEFT_ENTRY_CAMERA_XYZ_MM.reshape(3)
     selected_target = None
     selected_distance = None
     for det in detections:
         if not 0 <= det.label < len(labels):
             continue
-        if labels[det.label] == "handle":
+        if _is_ignored_label(labels[det.label], cs):
             continue
         coords = det.spatialCoordinates
         if not np.isfinite([coords.x, coords.y, coords.z]).all() or coords.z <= 0:
@@ -213,10 +222,10 @@ def build_v5s_pipeline(cs):
     return pipeline, labels
 
 
-def draw_detections(frame, detections, labels, selected_target):
+def draw_detections(frame, detections, labels, selected_target, cs=None):
     for det in detections:
         label = labels[det.label] if 0 <= det.label < len(labels) else str(det.label)
-        if label == "handle":
+        if _is_ignored_label(label, cs):
             continue
         x1 = int(det.xmin * frame.shape[1])
         y1 = int(det.ymin * frame.shape[0])
@@ -283,8 +292,8 @@ def run():
             in_det = q_det.get()
             frame = in_rgb.getCvFrame()
             detections = in_det.detections
-            selected = select_nearest_target(detections, labels)
-            draw_detections(frame, detections, labels, selected)
+            selected = select_nearest_target(detections, labels, cs=cs)
+            draw_detections(frame, detections, labels, selected, cs=cs)
             if selected is None:
                 camera_xyz = None
                 label = ""

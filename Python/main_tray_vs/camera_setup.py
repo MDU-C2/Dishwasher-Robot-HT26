@@ -40,6 +40,39 @@ _MODEL_ALIASES = {
 }
 
 
+NON_TARGET_LABELS = frozenset({"handle", "gripper"})
+
+
+def is_ignored_detection_label(label):
+    """Return True for non-cup detection classes such as 'handle' or 'Gripper'."""
+    return str(label).strip().lower() in NON_TARGET_LABELS
+
+
+def select_nearest_target(detections, labels, reference_xyz_mm):
+    """Return the nearest valid cup detection to `reference_xyz_mm`, excluding non-cup classes."""
+    if reference_xyz_mm is None:
+        return None
+    reference = np.asarray(reference_xyz_mm, dtype=np.float64).reshape(3)
+    if not np.isfinite(reference).all():
+        return None
+    selected_target = None
+    selected_distance = None
+    for det in detections:
+        if not (0 <= det.label < len(labels)):
+            continue
+        if is_ignored_detection_label(labels[det.label]):
+            continue
+        coords = det.spatialCoordinates
+        if not np.isfinite([coords.x, coords.y, coords.z]).all() or coords.z <= 0:
+            continue
+        point = np.array([coords.x, coords.y, coords.z], dtype=np.float64)
+        distance = float(np.linalg.norm(point - reference))
+        if selected_target is None or distance < selected_distance:
+            selected_target = det
+            selected_distance = distance
+    return selected_target
+
+
 def _uses_raw_yolo_output(blob_path):
     """Return True if the blob outputs a single raw YOLO tensor (e.g. output0 [8400, 4+C, 1]) instead of split grid heads."""
     try:

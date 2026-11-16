@@ -1,5 +1,6 @@
 import os
 import csv
+import threading
 from datetime import datetime
 from statistics import mean, median, stdev
 import numpy as np
@@ -251,6 +252,7 @@ class ReportLogger:
         self.window_start_perf = None
 
         # Per-cup recorded locks & completed cup records
+        self._lock = threading.RLock()
         self.lock_records = []
         self.cup_records = []
         self._finalized = False
@@ -539,9 +541,10 @@ class ReportLogger:
 
     def _rewrite_full_report_file(self):
         """Write the complete report (Sections 1-7) so the file is always complete on disk."""
-        full_text = self._build_header_and_cups_text() + self._build_summary_sections_text()
-        with open(self.report_txt_path, "w", encoding="utf-8") as f:
-            f.write(full_text)
+        with self._lock:
+            full_text = self._build_header_and_cups_text() + self._build_summary_sections_text()
+            with open(self.report_txt_path, "w", encoding="utf-8") as f:
+                f.write(full_text)
 
     def record_frame(
         self,
@@ -554,95 +557,99 @@ class ReportLogger:
         is_busy,
     ):
         """Record per-frame inference latency, FPS, and detection statistics for each distinct camera frame."""
-        self.total_frames += 1
-        if not is_busy:
-            self.idle_frames += 1
+        with self._lock:
+            self.total_frames += 1
+            if not is_busy:
+                self.idle_frames += 1
+                if selected_target is not None:
+                    self.current_cup_frames_inspected += 1
+
+            if on_chip_inference_ms is not None and 2.0 <= on_chip_inference_ms <= 500.0:
+                self.on_chip_inference_ms.append(float(on_chip_inference_ms))
+                self.nn_fps_list.append(float(1000.0 / on_chip_inference_ms))
+
+            if cam_to_pc_latency_ms is not None and 2.0 <= cam_to_pc_latency_ms <= 1000.0:
+                self.cam_to_pc_latency_ms.append(float(cam_to_pc_latency_ms))
+                if on_chip_inference_ms is not None and 2.0 <= on_chip_inference_ms <= cam_to_pc_latency_ms:
+                    self.usb_host_overhead_ms.append(float(cam_to_pc_latency_ms - on_chip_inference_ms))
+
+            if loop_ms is not None and loop_ms >= 0.0:
+                self.host_loop_ms.append(float(loop_ms))
+
+            if detections:
+                self.frames_with_detections += 1
             if selected_target is not None:
-                self.current_cup_frames_inspected += 1
+                self.frames_with_valid_target += 1
 
-        if on_chip_inference_ms is not None and 2.0 <= on_chip_inference_ms <= 500.0:
-            self.on_chip_inference_ms.append(float(on_chip_inference_ms))
-            self.nn_fps_list.append(float(1000.0 / on_chip_inference_ms))
-
-        if cam_to_pc_latency_ms is not None and 2.0 <= cam_to_pc_latency_ms <= 1000.0:
-            self.cam_to_pc_latency_ms.append(float(cam_to_pc_latency_ms))
-            if on_chip_inference_ms is not None and 2.0 <= on_chip_inference_ms <= cam_to_pc_latency_ms:
-                self.usb_host_overhead_ms.append(float(cam_to_pc_latency_ms - on_chip_inference_ms))
-
-        if loop_ms is not None and loop_ms >= 0.0:
-            self.host_loop_ms.append(float(loop_ms))
-
-        if detections:
-            self.frames_with_detections += 1
-        if selected_target is not None:
-            self.frames_with_valid_target += 1
-
-        for det in detections:
-            lbl = labels[det.label] if 0 <= det.label < len(labels) else str(det.label)
-            conf_pct = float(det.confidence * 100.0)
-            self.class_confidences.setdefault(lbl, []).append(conf_pct)
-            z_mm = float(det.spatialCoordinates.z)
-            if np.isfinite(z_mm) and z_mm > 0:
-                self.class_valid_depths.setdefault(lbl, []).append(z_mm)
+            for det in detections:
+                lbl = labels[det.label] if 0 <= det.label < len(labels) else str(det.label)
+                conf_pct = float(det.confidence * 100.0)
+                self.class_confidences.setdefault(lbl, []).append(conf_pct)
+                z_mm = float(det.spatialCoordinates.z)
+                if np.isfinite(z_mm) and z_mm > 0:
+                    self.class_valid_depths.setdefault(lbl, []).append(z_mm)
 
     def mark_window_started(self):
-        if self.window_start_perf is None:
-            self.window_start_perf = datetime.now()
+        with self._lock:
+            if self.window_start_perf is None:
+                self.window_start_perf = datetime.now()
 
     def record_window_reset(self, reason):
         """Record why the 5-frame grasp window was reset ('label' or 'distance')."""
-        if reason == "label":
-            self.total_label_flicker_resets += 1
-            self.current_cup_label_resets += 1
-        else:
-            self.total_distance_jump_resets += 1
-            self.current_cup_distance_resets += 1
-        self.window_start_perf = datetime.now()
+        with self._lock:
+            if reason == "label":
+                self.total_label_flicker_resets += 1
+                self.current_cup_label_resets += 1
+            else:
+                self.total_distance_jump_resets += 1
+                self.current_cup_distance_resets += 1
+            self.window_start_perf = datetime.now()
 
     def record_target_lock(self, grasp_samples, median_xyz, spread_xyz, target_robot_xyz, label, median_conf):
         """Snapshot vision stability metrics when 5/5 consistent frames are locked."""
-        now = datetime.now()
-        lock_time_s = (
-            (now - self.window_start_perf).total_seconds()
-            if self.window_start_perf is not None
-            else 0.0
-        )
-        stacked = np.vstack([s["xyz"] for s in grasp_samples])
-        std_xyz = np.std(stacked, axis=0, ddof=1) if len(stacked) > 1 else np.zeros(3)
-        spread_norm_mm = float(np.linalg.norm(spread_xyz))
-        cam_dist_mm = float(np.linalg.norm(median_xyz))
-        recent_ai_ms = _safe_mean(self.on_chip_inference_ms[-30:])
-        recent_e2e_ms = _safe_mean(self.cam_to_pc_latency_ms[-30:])
-        recent_fps = _safe_mean(self.nn_fps_list[-30:])
+        with self._lock:
+            now = datetime.now()
+            lock_time_s = (
+                (now - self.window_start_perf).total_seconds()
+                if self.window_start_perf is not None
+                else 0.0
+            )
+            stacked = np.vstack([s["xyz"] for s in grasp_samples])
+            std_xyz = np.std(stacked, axis=0, ddof=1) if len(stacked) > 1 else np.zeros(3)
+            spread_norm_mm = float(np.linalg.norm(spread_xyz))
+            cam_dist_mm = float(np.linalg.norm(median_xyz))
+            recent_ai_ms = _safe_mean(self.on_chip_inference_ms[-30:])
+            recent_e2e_ms = _safe_mean(self.cam_to_pc_latency_ms[-30:])
+            recent_fps = _safe_mean(self.nn_fps_list[-30:])
 
-        lock_info = {
-            "timestamp": now.strftime("%Y-%m-%d %H:%M:%S"),
-            "label": label,
-            "median_conf_pct": float(median_conf),
-            "mean_conf_pct": float(np.mean([s["conf"] for s in grasp_samples])),
-            "cam_median_xyz_mm": [round(float(v), 2) for v in median_xyz],
-            "cam_distance_mm": round(cam_dist_mm, 2),
-            "spread_xyz_mm": [round(float(v), 2) for v in spread_xyz],
-            "spread_norm_mm": round(spread_norm_mm, 2),
-            "std_xyz_mm": [round(float(v), 2) for v in std_xyz],
-            "robot_target_xyz_mm": [round(float(v), 2) for v in target_robot_xyz],
-            "lock_time_s": round(float(lock_time_s), 3),
-            "frames_inspected": int(max(self.current_cup_frames_inspected, len(grasp_samples))),
-            "label_resets": int(self.current_cup_label_resets),
-            "distance_resets": int(self.current_cup_distance_resets),
-            "total_resets": int(self.current_cup_label_resets + self.current_cup_distance_resets),
-            "ai_inference_ms": round(recent_ai_ms, 2),
-            "nn_latency_ms": round(recent_e2e_ms, 2),
-            "nn_fps": round(recent_fps, 2),
-        }
-        self.lock_records.append(lock_info)
+            lock_info = {
+                "timestamp": now.strftime("%Y-%m-%d %H:%M:%S"),
+                "label": label,
+                "median_conf_pct": float(median_conf),
+                "mean_conf_pct": float(np.mean([s["conf"] for s in grasp_samples])),
+                "cam_median_xyz_mm": [round(float(v), 2) for v in median_xyz],
+                "cam_distance_mm": round(cam_dist_mm, 2),
+                "spread_xyz_mm": [round(float(v), 2) for v in spread_xyz],
+                "spread_norm_mm": round(spread_norm_mm, 2),
+                "std_xyz_mm": [round(float(v), 2) for v in std_xyz],
+                "robot_target_xyz_mm": [round(float(v), 2) for v in target_robot_xyz],
+                "lock_time_s": round(float(lock_time_s), 3),
+                "frames_inspected": int(max(self.current_cup_frames_inspected, len(grasp_samples))),
+                "label_resets": int(self.current_cup_label_resets),
+                "distance_resets": int(self.current_cup_distance_resets),
+                "total_resets": int(self.current_cup_label_resets + self.current_cup_distance_resets),
+                "ai_inference_ms": round(recent_ai_ms, 2),
+                "nn_latency_ms": round(recent_e2e_ms, 2),
+                "nn_fps": round(recent_fps, 2),
+            }
+            self.lock_records.append(lock_info)
 
-        # Reset per-cup window counters for the next cup
-        self.window_start_perf = None
-        self.current_cup_label_resets = 0
-        self.current_cup_distance_resets = 0
-        self.current_cup_frames_inspected = 0
-        return lock_info
+            # Reset per-cup window counters for the next cup
+            self.window_start_perf = None
+            self.current_cup_label_resets = 0
+            self.current_cup_distance_resets = 0
+            self.current_cup_frames_inspected = 0
+            return lock_info
 
     def log_cup_event(
         self,
@@ -707,49 +714,62 @@ class ReportLogger:
             "right_arm_time_s": round(float(right_arm_time_s), 3),
             "robot_cycle_time_s": round(float(robot_cycle_time_s), 3),
         }
-        self.cup_records.append(record)
+        with self._lock:
+            self.cup_records.append(record)
 
-        # Immediately rewrite the full report (with updated Sections 4-7 summary tables!)
-        self._rewrite_full_report_file()
+            # Immediately rewrite the full report (with updated Sections 4-7 summary tables!)
+            self._rewrite_full_report_file()
 
-        # Append row to cumulative Report_Cups_Log.csv
-        write_header = not os.path.exists(self.cups_csv_path)
-        with open(self.cups_csv_path, "a", newline="", encoding="utf-8") as csv_f:
-            writer = csv.writer(csv_f)
-            if write_header:
+            # Append row to cumulative Report_Cups_Log.csv
+            write_header = not os.path.exists(self.cups_csv_path)
+            with open(self.cups_csv_path, "a", newline="", encoding="utf-8") as csv_f:
+                writer = csv.writer(csv_f)
+                if write_header:
+                    writer.writerow([
+                        "run_id", "timestamp", "model", "cup_no", "label", "conf_pct",
+                        "cam_x_mm", "cam_y_mm", "cam_z_mm", "cam_dist_mm",
+                        "spread_x_mm", "spread_y_mm", "spread_z_mm", "spread_norm_mm",
+                        "lock_time_s", "frames_inspected", "label_resets", "distance_resets",
+                        "ai_inference_ms", "camera_to_pc_latency_ms", "nn_fps",
+                        "rob_x_mm", "rob_y_mm", "rob_z_mm",
+                        "slot_name", "slot_x_mm", "slot_y_mm", "slot_z_mm",
+                        "pick_attempts", "grasp_retries", "first_try_ok", "placed_ok",
+                        "left_arm_pick_handover_s", "right_arm_place_s", "robot_cycle_time_s",
+                    ])
+                slot_xyz = record["slot_coords_mm"]
                 writer.writerow([
-                    "run_id", "timestamp", "model", "cup_no", "label", "conf_pct",
-                    "cam_x_mm", "cam_y_mm", "cam_z_mm", "cam_dist_mm",
-                    "spread_x_mm", "spread_y_mm", "spread_z_mm", "spread_norm_mm",
-                    "lock_time_s", "frames_inspected", "label_resets", "distance_resets",
-                    "ai_inference_ms", "camera_to_pc_latency_ms", "nn_fps",
-                    "rob_x_mm", "rob_y_mm", "rob_z_mm",
-                    "slot_name", "slot_x_mm", "slot_y_mm", "slot_z_mm",
-                    "pick_attempts", "grasp_retries", "first_try_ok", "placed_ok",
-                    "left_arm_pick_handover_s", "right_arm_place_s", "robot_cycle_time_s",
+                    self.run_id, record["timestamp"], self.model_name, cup_no, label, conf,
+                    cam_xyz[0], cam_xyz[1], cam_xyz[2], record["cam_distance_mm"],
+                    spread_xyz[0], spread_xyz[1], spread_xyz[2], record["spread_norm_mm"],
+                    record["lock_time_s"], record["frames_inspected"],
+                    record["label_resets"], record["distance_resets"],
+                    record["ai_inference_ms"], record["nn_latency_ms"], record["nn_fps"],
+                    rob_xyz[0], rob_xyz[1], rob_xyz[2],
+                    chosen_slot, slot_xyz[0], slot_xyz[1], slot_xyz[2],
+                    record["pick_attempts"], record["grasp_retries"], record["first_try_ok"],
+                    record["placed_ok"],
+                    record["left_arm_time_s"], record["right_arm_time_s"], record["robot_cycle_time_s"],
                 ])
-            slot_xyz = record["slot_coords_mm"]
-            writer.writerow([
-                self.run_id, record["timestamp"], self.model_name, cup_no, label, conf,
-                cam_xyz[0], cam_xyz[1], cam_xyz[2], record["cam_distance_mm"],
-                spread_xyz[0], spread_xyz[1], spread_xyz[2], record["spread_norm_mm"],
-                record["lock_time_s"], record["frames_inspected"],
-                record["label_resets"], record["distance_resets"],
-                record["ai_inference_ms"], record["nn_latency_ms"], record["nn_fps"],
-                rob_xyz[0], rob_xyz[1], rob_xyz[2],
-                chosen_slot, slot_xyz[0], slot_xyz[1], slot_xyz[2],
-                record["pick_attempts"], record["grasp_retries"], record["first_try_ok"],
-                record["placed_ok"],
-                record["left_arm_time_s"], record["right_arm_time_s"], record["robot_cycle_time_s"],
-            ])
+
+    def update_slot_verification(self, slot_name, verified_ok, verify_polls=None):
+        """Update the latest cup event for slot_name when async 2D verification completes."""
+        with self._lock:
+            for record in reversed(self.cup_records):
+                if record.get("chosen_slot") == str(slot_name) and record.get("handover_completed"):
+                    record["placed_ok"] = bool(verified_ok)
+                    if verify_polls is not None:
+                        record["verify_polls"] = int(verify_polls)
+                    self._rewrite_full_report_file()
+                    break
 
     def finalize_report(self):
         """Write final visual tables to the report file and append run-summary CSV row."""
-        if self._finalized:
-            return self.report_txt_path
-        self._finalized = True
+        with self._lock:
+            if self._finalized:
+                return self.report_txt_path
+            self._finalized = True
 
-        self._rewrite_full_report_file()
+            self._rewrite_full_report_file()
 
         end_dt = datetime.now()
         session_duration_s = (end_dt - self.start_dt).total_seconds()

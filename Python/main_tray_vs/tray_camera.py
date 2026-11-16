@@ -89,11 +89,15 @@ _active_boxes = {}
 _res = set()
 _seen = {}
 _miss = {}
+_verify_active: set[str] = set()
+_verify_epoch = 0
 _lock = threading.RLock()
 
 # --- background capture thread state ---
 _cap_thread = None
 _cap_running = False
+_live_thread = None
+_live_running = False
 _cap_lost = False
 _latest_frame = None
 _latest_time = 0.0
@@ -680,23 +684,104 @@ def reserve():
 
 
 def verify(n):
-    """Check slot holds cup."""
+    """Check slot holds cup. Keeps slot reserved until verification succeeds or gives up."""
     with _lock:
         ok = _scan()
-        _res.discard(n)
-        _draw()
         if not ok:
+            _res.discard(n)
             _miss.pop(n, None)
+            _draw()
             return None
         if _seen.get(n) == "occupied":
+            _res.discard(n)
             _miss.pop(n, None)
+            _draw()
             return True
         _miss[n] = _miss.get(n, 0) + 1
         if _miss[n] < TRIES:
+            _draw()
             return False
+        _res.discard(n)
         _miss.pop(n)
+        _draw()
         print(f"[TRAY] Cup not seen in '{n}'. Giving up.")
         return None
+
+
+def reserve_slot(n):
+    """Mark slot `n` as reserved so subsequent picks do not select it prematurely."""
+    with _lock:
+        _res.add(n)
+        _miss.pop(n, None)
+        _draw()
+
+
+def reserved_slots():
+    """Return a copy of currently reserved or verifying slot names."""
+    with _lock:
+        return set(_res)
+
+
+def has_cached_free_slot():
+    """Fast non-blocking check whether a calibrated slot is currently known free (or unscanned yet)."""
+    with _lock:
+        if _when <= 0.0:
+            return True
+        known = _coords()
+        return any(
+            _seen.get(n) == "free" and n in known and n not in _res
+            for n in boxes()
+        )
+
+
+def verify_async(n, initial_delay=0.5, poll_interval=0.5, on_complete=None):
+    """Verify placement in `n` on a background daemon thread without blocking the main loop."""
+    with _lock:
+        _res.add(n)
+        _miss.pop(n, None)
+        if n in _verify_active:
+            return False
+        _verify_active.add(n)
+        epoch = _verify_epoch
+        _draw()
+
+    def _worker():
+        polls = 0
+        verified = False
+        try:
+            if initial_delay > 0:
+                time.sleep(initial_delay)
+            while True:
+                with _lock:
+                    if _verify_epoch != epoch:
+                        _res.discard(n)
+                        return
+                polls += 1
+                res = verify(n)
+                if res is True:
+                    verified = True
+                    print(f"[TRAY] Placement verified in slot '{n}' (async, {polls} poll(s)).")
+                    break
+                if res is None:
+                    verified = False
+                    break
+                if polls == 1:
+                    print(f"[TRAY] Waiting for mug to appear in dishwasher slot '{n}' (async)...")
+                if poll_interval > 0:
+                    time.sleep(poll_interval)
+        except Exception as exc:
+            print(f"[TRAY] ERROR during async placement verification for '{n}': {exc}")
+        finally:
+            with _lock:
+                _verify_active.discard(n)
+            if callable(on_complete):
+                try:
+                    on_complete(n, verified, polls)
+                except Exception:
+                    pass
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return True
 
 
 def drop(n):
@@ -709,16 +794,53 @@ def drop(n):
 def view():
     """New tray image, else None."""
     global _new
-    if not _new:
-        return None
-    _new = False
-    return _view
+    with _lock:
+        if not _new or _view is None:
+            return None
+        _new = False
+        return _view.copy()
+
+
+def start_live_scanner(interval=None):
+    """Run periodic 2D threshold live scanning in a background thread so UI loops never block."""
+    global _live_thread, _live_running
+    period = float(LIVE_AGE if interval is None else interval)
+    with _lock:
+        if _live_thread is not None and _live_thread.is_alive():
+            return False
+        _live_running = True
+
+    def _live_worker():
+        while _live_running:
+            with _lock:
+                should_scan = (
+                    not _verify_active
+                    and (time.time() - _when >= period)
+                )
+            if should_scan:
+                try:
+                    _scan(n=1, wait=0.0, quiet=True)
+                except Exception:
+                    pass
+            time.sleep(min(0.25, max(0.05, period / 4.0)))
+
+    _live_thread = threading.Thread(target=_live_worker, daemon=True)
+    _live_thread.start()
+    return True
 
 
 def close():
-    """Release the camera and stop the background capture thread."""
-    global _cap, _cap_running, _cap_thread
+    """Release the camera and stop background capture/scanner threads."""
+    global _cap, _cap_running, _cap_thread, _live_running, _live_thread, _verify_epoch
+    _live_running = False
+    live_thr = _live_thread
+    if live_thr is not None:
+        live_thr.join(timeout=1.0)
     with _lock:
+        _verify_epoch += 1
+        _verify_active.clear()
+        _res.clear()
+        _live_thread = None
         _cap_running = False
         if _cap_thread is not None:
             _cap_thread.join(timeout=1.0)

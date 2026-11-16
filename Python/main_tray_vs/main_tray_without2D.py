@@ -187,7 +187,7 @@ def select_nearest_target(detections, labels):
     for det in detections:
         if not 0 <= det.label < len(labels):
             continue
-        if labels[det.label] == "handle":
+        if cs.is_ignored_detection_label(labels[det.label]):
             continue
         coords = det.spatialCoordinates
         if not np.isfinite([coords.x, coords.y, coords.z]).all() or coords.z <= 0:
@@ -390,7 +390,7 @@ def run():
             'right_side': [-1.0, 0.0, 0.0],
             'upright': [0.0, 1.0 ,0.0],
             'upside_down': [0.0, -1.0, 0.0],
-            'Gripper': [0.0, 0.0, -1.0],
+
         }
     quaternion = [1,0,0,0] # Dump value, not used in robot but needs to be sent.
     cam_coords = 'saved_coordinates.txt' # Path to camera coordinates .txt file
@@ -626,9 +626,9 @@ def run():
 
                     # Determine label text to display
                     label = str(det.label)
-                    if det.label < len(labels):
+                    if 0 <= det.label < len(labels):
                         label = labels[det.label]
-                    if label != 'handle':
+                    if not cs.is_ignored_detection_label(label):
 
                         conf  = int(det.confidence * 100) # Confidence percentage
 

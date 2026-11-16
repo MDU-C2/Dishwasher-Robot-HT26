@@ -2,6 +2,7 @@ import socket
 import time
 import ast
 import threading
+from collections import deque
 import cv2 as cv
 from config_loader import load_config
 lock = threading.Lock()
@@ -15,9 +16,11 @@ class Communication():
 
         self.sleep_time = 0
 
-        self._mutex_variable = threading.Lock()  #mutex for accessing variables
-        self._mutex_function = threading.Lock()  #mutex for accessing functions
+        self._mutex_variable = threading.RLock()  # re-entrant mutex for accessing shared variables
+        self._mutex_function = threading.RLock()  # re-entrant mutex so _handle_response -> disconnect never self-deadlocks
         self.socket = None
+        self._rx_queue = deque()
+        self._rx_buffer = ""
         self.config = load_config()
         self.port = int(self.config["robot"]["socket_port"])
         self.host = str(self.config["robot"]["ip"])
@@ -43,7 +46,26 @@ class Communication():
         self.ASKFREESLOT = ["Ask_LeavePosition", "Ask_FreeSlot"]
 
         self.NEXTSTEP = ["Next_step",]
-        self.ERROR = ["[ERROR]_wrong_format,try_again(exampel[x,y,z])","[ERROR]_wrong_format,send_normal","[ERROR]_wrong_format,try_again(exampel[q1,q2,q3,q4])",]
+        self.ERROR = [
+            "[ERROR]_wrong_format,try_again(exampel[x,y,z])",
+            "[ERROR]_wrong_format,send_normal",
+            "[ERROR]_wrong_format,try_again(exampel[q1,q2,q3,q4])",
+            "[ERROR] Invalid format, retry",
+        ]
+        # Known fixed RAPID messages sorted longest-first to split back-to-back TCP coalesced sends
+        self._known_tokens = tuple(sorted(
+            {
+                t for group in (
+                    self.ACKS, self.CLOSE, self.ROBOTWANTSTOSENDCOORDINATES,
+                    self.ROBOTWANTSTOSENDORIENTATION, self.ASKMUGCOORDINATES,
+                    self.ASKMUGORIENTATION, self.ASKNEXT, self.ASKCALPOINT,
+                    self.ASKMUGNORMAL, self.ASKFREESLOT, self.NEXTSTEP, self.ERROR,
+                )
+                for t in group if t
+            },
+            key=len,
+            reverse=True,
+        ))
 
         ## List of what python can send
 
@@ -90,7 +112,9 @@ class Communication():
         while True: # It will loop until the response is in "ASKNEXT" or RAPID wants to close the connection (CLOSE).
 
             response = self._receive_message()
-
+            if response is None:
+                self.disconnect()
+                return None
 
             match response:
                 case next if next in self.ASKNEXT:
@@ -148,21 +172,24 @@ class Communication():
                     with self._mutex_variable:
                         if self.last_handover_timestamp is None:
                             self.last_handover_timestamp = time.perf_counter()
-                        if hasattr(self, 'get_free_slot_logic') and callable(self.get_free_slot_logic):
-                            try:
-                                slot_coords = self.get_free_slot_logic()
-                                if slot_coords is not None:
-                                    self._send_message(str(list(slot_coords)))
-                                else:
-                                    self._send_message("NO_SLOT")
-                            except Exception as exc:
-                                print(f" error: {exc}")
+                        slot_cb = getattr(self, 'get_free_slot_logic', None)
+                        fallback_slot = list(self.FreeSlot) if self.FreeSlot is not None else None
+                    # Invoke callback outside _mutex_variable so background slot resolution cannot deadlock
+                    if callable(slot_cb):
+                        try:
+                            slot_coords = slot_cb()
+                            if slot_coords is not None:
+                                self._send_message(str(list(slot_coords)))
+                            else:
                                 self._send_message("NO_SLOT")
-                        elif self.FreeSlot is not None:
-                            self._send_message(str(list(self.FreeSlot)))
-                        else:
-                            # Invalid for rob_coordinates so RAPID retries instead of going to [0,0,0]
+                        except Exception as exc:
+                            print(f" error: {exc}")
                             self._send_message("NO_SLOT")
+                    elif fallback_slot is not None:
+                        self._send_message(str(fallback_slot))
+                    else:
+                        # Invalid for rob_coordinates so RAPID retries instead of going to [0,0,0]
+                        self._send_message("NO_SLOT")
 
                 case error if error in self.ERROR:
                     print("Known error occured")
@@ -199,8 +226,11 @@ class Communication():
             """Connect to RAPID server"""
             try:
                 self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                 #socket.settimeout(120)  # Increased to 120 seconds for robot movement, Dont use time out
                 self.socket.connect((self.host, self.port))
+                self._rx_queue.clear()
+                self._rx_buffer = ""
                 self.connected = True
                 print(f"[INFO] Connected to RAPID server at {self.host}:{self.port}")
 
@@ -215,8 +245,11 @@ class Communication():
             """Connect to RAPID server"""
             try:
                 self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                 #socket.settimeout(120)  # Increased to 120 seconds for robot movement, Dont use time out
                 self.socket.connect((self.host, self.port))
+                self._rx_queue.clear()
+                self._rx_buffer = ""
                 self.connected = True
                 print(f"[INFO] Connected to RAPID server at {self.host}:{self.port}")
                 return True
@@ -244,6 +277,8 @@ class Communication():
             finally:
                 self.connected = False
                 self.socket = None
+                self._rx_queue.clear()
+                self._rx_buffer = ""
 
         
     def _send_message(self, message):
@@ -260,10 +295,42 @@ class Communication():
             self.connected = False
             return None
 
+    def _drain_rx_buffer(self):
+        """Extract complete protocol messages from TCP stream buffer, splitting coalesced RAPID sends."""
+        while self._rx_buffer:
+            matched = None
+            for tok in self._known_tokens:
+                if self._rx_buffer.startswith(tok):
+                    matched = tok
+                    break
+            if matched is not None:
+                self._rx_queue.append(matched)
+                self._rx_buffer = self._rx_buffer[len(matched):]
+                continue
+            # If buffer is a partial prefix of a known token split across TCP packets, wait for more bytes
+            if any(tok.startswith(self._rx_buffer) and tok != self._rx_buffer for tok in self._known_tokens):
+                break
+            # Non-tokenized payload (e.g. Robot_Wants_To_Send_* coordinates/orientation)
+            self._rx_queue.append(self._rx_buffer)
+            self._rx_buffer = ""
+            break
+
     def _receive_message(self):
-        """Receive message from RAPID"""
+        """Receive message from RAPID, handling coalesced TCP packets."""
         try:
-            message = self.socket.recv(1024).decode()
+            while not self._rx_queue:
+                chunk = self.socket.recv(1024).decode()
+                if not chunk:
+                    if self._rx_buffer:
+                        msg = self._rx_buffer
+                        self._rx_buffer = ""
+                        print(f"[RECEIVED] {msg}")
+                        return msg
+                    self.connected = False
+                    return None
+                self._rx_buffer += chunk
+                self._drain_rx_buffer()
+            message = self._rx_queue.popleft()
             print(f"[RECEIVED] {message}")
             return message
         except socket.timeout:
