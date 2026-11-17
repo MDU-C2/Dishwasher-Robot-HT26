@@ -35,7 +35,7 @@ class ServoCard(QFrame):
         servo_name.setObjectName("ServoName")
         left.addWidget(servo_name)
         subtitle = QLabel(
-            "Speed control  ·  360° · center = stop"
+            "Continuous rotation · 360° · center = stop"
             if continuous
             else "Position control  ·  0–180°"
         )
@@ -44,7 +44,7 @@ class ServoCard(QFrame):
         top.addLayout(left)
         top.addStretch()
         self._command = DEFAULT_ANGLE
-        self.value_text = QLabel("STOPP" if continuous else f"{DEFAULT_ANGLE:03d}°")
+        self.value_text = QLabel("STOP" if continuous else f"{DEFAULT_ANGLE:03d}°")
         self.value_text.setObjectName("Angle")
         top.addWidget(self.value_text)
         outer.addLayout(top)
@@ -53,17 +53,17 @@ class ServoCard(QFrame):
         self.spinbox = None
         if continuous:
             outer.addSpacing(12)
-            instruction = QLabel("HÅLL IN EN KNAPP · SLÄPP FÖR STOPP")
+            instruction = QLabel("HOLD A DIRECTION · RELEASE TO STOP")
             instruction.setObjectName("SmallCaps")
             outer.addWidget(instruction)
             direction_row = QHBoxLayout()
             direction_row.setSpacing(10)
-            self.reverse_button = QPushButton("⟲  Bakåt")
+            self.reverse_button = QPushButton("⟲  Reverse")
             self.reverse_button.setObjectName("HoldReverse")
-            self.reverse_button.setToolTip("Håll inne för att rotera åt ena hållet")
-            self.forward_button = QPushButton("⟳  Framåt")
+            self.reverse_button.setToolTip("Hold to rotate in one direction")
+            self.forward_button = QPushButton("⟳  Forward")
             self.forward_button.setObjectName("HoldForward")
-            self.forward_button.setToolTip("Håll inne för att rotera åt andra hållet")
+            self.forward_button.setToolTip("Hold to rotate in the other direction")
             direction_row.addWidget(self.reverse_button, 1)
             direction_row.addWidget(self.forward_button, 1)
             outer.addLayout(direction_row)
@@ -73,7 +73,7 @@ class ServoCard(QFrame):
             self.forward_button.released.connect(self._continuous_released)
         else:
             outer.addSpacing(12)
-            target_label = QLabel("KOMMENDERAD MÅLVINKEL")
+            target_label = QLabel("COMMANDED TARGET ANGLE")
             target_label.setObjectName("SmallCaps")
             outer.addWidget(target_label)
 
@@ -82,7 +82,7 @@ class ServoCard(QFrame):
             self.slider.setSingleStep(1)
             self.slider.setPageStep(10)
             self.slider.setValue(DEFAULT_ANGLE)
-            self.slider.setToolTip("Önskad vinkel, inte uppmätt verklig vinkel")
+            self.slider.setToolTip("Requested angle, not measured physical position")
             outer.addWidget(self.slider)
 
             ticks = QHBoxLayout()
@@ -96,7 +96,7 @@ class ServoCard(QFrame):
 
             bottom = QHBoxLayout()
             bottom.setSpacing(8)
-            target_input_label = QLabel("Ange vinkel")
+            target_input_label = QLabel("Set angle")
             target_input_label.setObjectName("Description")
             bottom.addWidget(target_input_label)
             self.spinbox = QSpinBox()
@@ -113,7 +113,7 @@ class ServoCard(QFrame):
                 bottom.addWidget(button)
             outer.addLayout(bottom)
 
-        self.feedback = QLabel("Arduino ej ansluten")
+        self.feedback = QLabel("Arduino not connected")
         self.feedback.setObjectName("Description")
         outer.addSpacing(8)
         outer.addWidget(self.feedback)
@@ -136,21 +136,15 @@ class ServoCard(QFrame):
 
     def set_ack(self, angle: int) -> None:
         if self.continuous:
-            label = "bakåt" if angle == MIN_ANGLE else "framåt" if angle == MAX_ANGLE else "stopp"
-            self.feedback.setText(f"✓ Arduino bekräftade: {label}")
+            label = "reverse" if angle == MIN_ANGLE else "forward" if angle == MAX_ANGLE else "stop"
+            self.feedback.setText(f"✓ Arduino confirmed: {label}")
         else:
-            self.feedback.setText(f"✓ Arduino bekräftade målvärde: {angle}°")
-        self.feedback.setStyleSheet("color: #5BDAC9;")
+            self.feedback.setText(f"✓ Arduino accepted target: {angle}°")
+        self.feedback.setStyleSheet("color: #D5D5D5;")
 
     def set_offline(self) -> None:
-        self.feedback.setText("Arduino ej ansluten")
-        self.feedback.setStyleSheet("color: #92A3B6;")
-
-    def set_joystick_axis(self, axis: str) -> None:
-        """Highlight this card when its channel is controlled by X or Y."""
-        self.setProperty("joystickAxis", axis)
-        self.style().unpolish(self)
-        self.style().polish(self)
+        self.feedback.setText("Arduino not connected")
+        self.feedback.setStyleSheet("color: #858585;")
 
     def _slider_changed(self, value: int) -> None:
         self._command = value
@@ -168,11 +162,11 @@ class ServoCard(QFrame):
 
     def _update_continuous_display(self, value: int) -> None:
         if value == MIN_ANGLE:
-            self.value_text.setText("BAKÅT")
+            self.value_text.setText("REVERSE")
         elif value == MAX_ANGLE:
-            self.value_text.setText("FRAMÅT")
+            self.value_text.setText("FORWARD")
         else:
-            self.value_text.setText("STOPP")
+            self.value_text.setText("STOP")
 
     def reset_continuous_state(self) -> None:
         """Reset the visual hold-button state without sending serial data."""

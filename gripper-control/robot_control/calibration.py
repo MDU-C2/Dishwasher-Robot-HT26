@@ -28,14 +28,14 @@ class ServoCalibration:
     def validate(self) -> str | None:
         values = (self.min_us, self.center_us, self.max_us)
         if any(not isinstance(value, int) for value in values):
-            return "Pulsvärden måste vara heltal."
+            return "Pulse values must be integers."
         if any(value < PULSE_MIN_ALLOWED_US or value > PULSE_MAX_ALLOWED_US for value in values):
             return (
-                f"Pulsvärden måste ligga mellan {PULSE_MIN_ALLOWED_US} och "
+                f"Pulse values must be between {PULSE_MIN_ALLOWED_US} and "
                 f"{PULSE_MAX_ALLOWED_US} µs."
             )
         if not self.min_us < self.center_us < self.max_us:
-            return "Ordningen måste vara 0° min < 90° center < 180° max."
+            return "Values must follow 0° min < 90° center < 180° max."
         return None
 
     def pulse_for_angle(self, angle: int) -> int:

@@ -1,41 +1,26 @@
-"""Modern PySide6 dashboard for the gripper prototype."""
+"""Brutalist PySide6 control panel for the dishwasher robot gripper."""
 
 from __future__ import annotations
+
+import time
 
 import serial.tools.list_ports
 from PySide6.QtCore import QSettings, QTimer, Qt
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QMainWindow,
-    QPushButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget,
+    QPushButton, QScrollArea, QSpinBox, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from .config import (
-    APP_TITLE,
-    CALIBRATION_STEP_US,
-    COMMAND_INTERVAL_MS,
-    CONTINUOUS_SERVO_CHANNELS,
-    DEFAULT_ANGLE,
-    DEFAULT_CALIBRATION_US,
-    DEFAULT_CONTINUOUS_CALIBRATION_US,
-    FSR_ADC_CHANNEL,
-    FSR_ADC_LABEL,
-    FSR_ADC_MAX,
-    FSR_ADC_REFERENCE_MV,
-    JOYSTICK_GROUPS,
-    MAX_ANGLE,
-    MIN_ANGLE,
-    PULSE_MAX_ALLOWED_US,
-    PULSE_MIN_ALLOWED_US,
-    SERVO_CHANNELS,
+    APP_TITLE, CALIBRATION_STEP_US, COMMAND_INTERVAL_MS, CONTINUOUS_SERVO_CHANNELS,
+    DEFAULT_ACCELERATION_DEG_S2, DEFAULT_ANGLE, DEFAULT_CALIBRATION_US,
+    DEFAULT_CONTINUOUS_CALIBRATION_US, DEFAULT_MAX_SPEED_DEG_S,
+    MAX_ACCELERATION_DEG_S2, MAX_MAX_SPEED_DEG_S, MAX_ANGLE,
+    MIN_ACCELERATION_DEG_S2, MIN_MAX_SPEED_DEG_S, MIN_ANGLE,
+    PULSE_MAX_ALLOWED_US, PULSE_MIN_ALLOWED_US, SERVO_CHANNELS,
 )
 from .calibration import ServoCalibration
-from .protocol import (
-    parse_line,
-    set_angle,
-    set_calibration,
-    set_joystick_area,
-    set_joystick_enabled,
-)
+from .protocol import parse_line, set_angle, set_calibration, set_motion_profile
 from .serial_worker import SerialWorker
 from .servo_card import ServoCard
 
@@ -44,23 +29,22 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(APP_TITLE)
-        self.resize(1080, 780)
-        self.setMinimumSize(850, 630)
+        self.resize(1180, 860)
+        self.setMinimumSize(900, 680)
         self.worker: SerialWorker | None = None
         self.arduino_ready = False
         self.pending: dict[int, int] = {}
         self.cards: dict[int, ServoCard] = {}
         self._last_error = ""
+        self._last_pong = 0.0
         self.settings = QSettings("MDU-C2", "Gripper Control")
         self.cal_inputs: dict[int, tuple[QSpinBox, QSpinBox, QSpinBox]] = {}
+        self.motion_enabled_boxes: dict[int, QCheckBox] = {}
+        self.motion_speed_spins: dict[int, QSpinBox] = {}
+        self.motion_acceleration_spins: dict[int, QSpinBox] = {}
+        self.motion_notes: dict[int, QLabel] = {}
         self.cal_test_buttons: dict[int, tuple[QPushButton, QPushButton, QPushButton]] = {}
         self.cal_notes: dict[int, QLabel] = {}
-        self.joystick_mode = 0
-        self.joystick_area = max(
-            0, min(1, self.settings.value("joystick/area", 0, type=int))
-        )
-        self.joystick_seen = False
-        self.fsr_seen = False
 
         self._build_ui()
         self.refresh_ports()
@@ -69,6 +53,11 @@ class MainWindow(QMainWindow):
         self.send_timer.setInterval(COMMAND_INTERVAL_MS)
         self.send_timer.timeout.connect(self._flush_pending)
         self.send_timer.start()
+
+        self.heartbeat_timer = QTimer(self)
+        self.heartbeat_timer.setInterval(1000)
+        self.heartbeat_timer.timeout.connect(self._heartbeat)
+        self.heartbeat_timer.start()
 
     def _build_ui(self) -> None:
         scroll = QScrollArea()
@@ -80,335 +69,293 @@ class MainWindow(QMainWindow):
         page = QWidget()
         page.setObjectName("Page")
         scroll.setWidget(page)
-
         content = QVBoxLayout(page)
-        content.setContentsMargins(34, 30, 34, 30)
-        content.setSpacing(22)
+        content.setContentsMargins(30, 24, 30, 28)
+        content.setSpacing(18)
 
-        header = QHBoxLayout()
-        titles = QVBoxLayout()
-        titles.setSpacing(7)
-        kicker = QLabel("MDU   /   DISHWASHER ROBOT   /   CONTROL STATION")
-        kicker.setObjectName("Kicker")
-        titles.addWidget(kicker)
-        title = QLabel("Gripper control")
+        masthead = QHBoxLayout()
+        heading = QVBoxLayout()
+        eyebrow = QLabel("MDU  /  DISHWASHER ROBOT  /  HT26")
+        eyebrow.setObjectName("Kicker")
+        heading.addWidget(eyebrow)
+        title = QLabel("GRIPPER CONTROL")
         title.setObjectName("Hero")
-        titles.addWidget(title)
-        subtitle = QLabel("Livekontroll av servomotorer  ·  Arduino UNO R4 WiFi + PCA9685")
+        heading.addWidget(title)
+        subtitle = QLabel("MANUAL SERVO CONTROL  ·  ARDUINO UNO R4 WIFI + PCA9685")
         subtitle.setObjectName("BodyMuted")
-        titles.addWidget(subtitle)
-        header.addLayout(titles)
-        header.addStretch(1)
-        self.status = QLabel("●  OFFLINE")
+        heading.addWidget(subtitle)
+        masthead.addLayout(heading)
+        masthead.addStretch(1)
+        self.status = QLabel("■ OFFLINE")
         self.status.setObjectName("Off")
-        header.addWidget(self.status, alignment=Qt.AlignmentFlag.AlignTop)
-        content.addLayout(header)
+        masthead.addWidget(self.status, alignment=Qt.AlignmentFlag.AlignTop)
+        content.addLayout(masthead)
 
-        panel = QFrame()
-        panel.setObjectName("Panel")
-        connection = QVBoxLayout(panel)
-        connection.setContentsMargins(22, 19, 22, 19)
-        connection.setSpacing(12)
-        section = QLabel("ANSLUTNING")
-        section.setObjectName("Kicker")
-        connection.addWidget(section)
-        connection_row = QHBoxLayout()
-        connection_row.setSpacing(10)
+        connection = QFrame()
+        connection.setObjectName("Panel")
+        connection_layout = QVBoxLayout(connection)
+        connection_layout.setContentsMargins(18, 16, 18, 16)
+        connection_layout.setSpacing(10)
+        label = QLabel("01  /  CONNECTION")
+        label.setObjectName("Kicker")
+        connection_layout.addWidget(label)
+        row = QHBoxLayout()
+        row.setSpacing(9)
         self.ports = QComboBox()
         self.ports.setMinimumWidth(300)
-        connection_row.addWidget(self.ports, 1)
-        refresh = QPushButton("Uppdatera portar")
-        refresh.clicked.connect(self.refresh_ports)
-        connection_row.addWidget(refresh)
-        self.refresh_button = refresh
-        self.connect_button = QPushButton("Anslut")
+        row.addWidget(self.ports, 1)
+        self.refresh_button = QPushButton("REFRESH PORTS")
+        self.refresh_button.clicked.connect(self.refresh_ports)
+        row.addWidget(self.refresh_button)
+        self.connect_button = QPushButton("CONNECT")
         self.connect_button.setObjectName("Primary")
+        self.connect_button.setMinimumWidth(130)
         self.connect_button.clicked.connect(self._toggle_connection)
-        self.connect_button.setMinimumWidth(125)
-        connection_row.addWidget(self.connect_button)
-        connection.addLayout(connection_row)
-        self.connection_note = QLabel("Välj Arduino-porten och tryck Anslut.")
+        row.addWidget(self.connect_button)
+        connection_layout.addLayout(row)
+        self.connection_note = QLabel("SELECT A PORT AND CONNECT.")
         self.connection_note.setObjectName("Description")
-        connection.addWidget(self.connection_note)
-        content.addWidget(panel)
+        connection_layout.addWidget(self.connection_note)
+        content.addWidget(connection)
 
+        self.tabs = QTabWidget()
+        self.tabs.setObjectName("MainTabs")
+        content.addWidget(self.tabs, 1)
+
+        control_page = QWidget()
+        control_layout = QVBoxLayout(control_page)
+        control_layout.setContentsMargins(2, 14, 2, 2)
+        control_layout.setSpacing(14)
         section_row = QHBoxLayout()
-        section_title = QLabel("SERVO CONTROL")
+        section_title = QLabel("02  /  SERVO CONTROL")
         section_title.setObjectName("Kicker")
         section_row.addWidget(section_title)
-        section_row.addStretch()
-        center = QPushButton("↺  Alla till 90°")
-        center.setToolTip("Sätter alla servonas målvinklar till 90°")
+        section_row.addStretch(1)
+        center = QPushButton("CENTER ALL  ↺")
+        center.setToolTip("Moves all position servos to 90° and stops continuous servos")
         center.clicked.connect(self._center_all)
         section_row.addWidget(center)
-        content.addLayout(section_row)
+        control_layout.addLayout(section_row)
 
         servo_grid = QGridLayout()
-        servo_grid.setHorizontalSpacing(16)
-        servo_grid.setVerticalSpacing(16)
+        servo_grid.setHorizontalSpacing(14)
+        servo_grid.setVerticalSpacing(14)
         for index, (channel, name) in enumerate(SERVO_CHANNELS.items()):
-            card = ServoCard(
-                channel,
-                name,
-                continuous=channel in CONTINUOUS_SERVO_CHANNELS,
-            )
+            card = ServoCard(channel, name, continuous=channel in CONTINUOUS_SERVO_CHANNELS)
             card.changed.connect(self._servo_changed)
             self.cards[channel] = card
             servo_grid.addWidget(card, index // 2, index % 2)
-        content.addLayout(servo_grid)
+        control_layout.addLayout(servo_grid)
+        control_layout.addStretch(1)
+        self.tabs.addTab(control_page, "01  SERVOS")
 
-        joystick_panel = QFrame()
-        joystick_panel.setObjectName("Panel")
-        joystick_layout = QVBoxLayout(joystick_panel)
-        joystick_layout.setContentsMargins(22, 18, 22, 20)
-        joystick_layout.setSpacing(10)
-        joystick_title_row = QHBoxLayout()
-        joystick_title = QLabel("JOYSTICK CONTROL")
-        joystick_title.setObjectName("Kicker")
-        joystick_title_row.addWidget(joystick_title)
-        joystick_title_row.addStretch(1)
-        self.joystick_status = QLabel("● EJ ANSLUTEN")
-        self.joystick_status.setObjectName("Off")
-        joystick_title_row.addWidget(self.joystick_status)
-        joystick_layout.addLayout(joystick_title_row)
-
-        joystick_info = QGridLayout()
-        joystick_info.setHorizontalSpacing(18)
-        joystick_info.setVerticalSpacing(6)
-        mode_label = QLabel("Läge")
-        mode_label.setObjectName("Description")
-        self.joystick_mode_label = QLabel("Väntar på Arduino")
-        self.joystick_mode_label.setObjectName("SectionTitle")
-        x_label = QLabel("X-axel")
-        x_label.setObjectName("Description")
-        self.joystick_x_label = QLabel("–")
-        y_label = QLabel("Y-axel")
-        y_label.setObjectName("Description")
-        self.joystick_y_label = QLabel("–")
-        joystick_info.addWidget(mode_label, 0, 0)
-        joystick_info.addWidget(self.joystick_mode_label, 0, 1)
-        joystick_info.addWidget(x_label, 1, 0)
-        joystick_info.addWidget(self.joystick_x_label, 1, 1)
-        joystick_info.addWidget(y_label, 2, 0)
-        joystick_info.addWidget(self.joystick_y_label, 2, 1)
-        joystick_layout.addLayout(joystick_info)
-
-        joystick_controls = QHBoxLayout()
-        self.joystick_area_checkbox = QCheckBox("Fingerläge (kanal 6–8)")
-        self.joystick_area_checkbox.setChecked(self.joystick_area == 1)
-        self.joystick_area_checkbox.setToolTip(
-            "Växla mellan Övriga-läget (kanal 0–5) och fingerläget (kanal 6–8)."
+        calibration_page = QWidget()
+        calibration_layout = QVBoxLayout(calibration_page)
+        calibration_layout.setContentsMargins(2, 14, 2, 2)
+        calibration_layout.setSpacing(14)
+        cal_intro = QFrame()
+        cal_intro.setObjectName("Panel")
+        intro_layout = QVBoxLayout(cal_intro)
+        intro_layout.setContentsMargins(18, 15, 18, 15)
+        intro_title = QLabel("03  /  SERVO CALIBRATION")
+        intro_title.setObjectName("Kicker")
+        intro_layout.addWidget(intro_title)
+        intro_text = QLabel(
+            "Adjust the pulse width for each channel. Position servos use 0° / 90° / 180°. "
+            "Continuous servos use reverse / stop / forward. Save at stop and test one "
+            "point at a time without mechanical load."
         )
-        self.joystick_area_checkbox.toggled.connect(self._joystick_area_changed)
-        joystick_controls.addWidget(self.joystick_area_checkbox)
-        self.joystick_enabled_checkbox = QCheckBox("Joystick aktiv")
-        self.joystick_enabled_checkbox.setChecked(
-            self.settings.value("joystick/enabled", True, type=bool)
-        )
-        self.joystick_enabled_checkbox.toggled.connect(self._joystick_enabled_changed)
-        joystick_controls.addWidget(self.joystick_enabled_checkbox)
-        joystick_controls.addStretch(1)
-        joystick_hint = QLabel(
-            "Tryck på joystick-knappen för nästa läge · släpp till neutral efter lägesbyte"
-        )
-        joystick_hint.setObjectName("Description")
-        joystick_controls.addWidget(joystick_hint)
-        joystick_layout.addLayout(joystick_controls)
-        content.addWidget(joystick_panel)
+        intro_text.setObjectName("Description")
+        intro_text.setWordWrap(True)
+        intro_layout.addWidget(intro_text)
+        calibration_layout.addWidget(cal_intro)
 
-        calibration_panel = QFrame()
-        calibration_panel.setObjectName("Panel")
-        calibration_layout = QVBoxLayout(calibration_panel)
-        calibration_layout.setContentsMargins(22, 18, 22, 20)
-        calibration_layout.setSpacing(11)
-        cal_title = QLabel("SERVO CALIBRATION  /  PWM")
-        cal_title.setObjectName("Kicker")
-        calibration_layout.addWidget(cal_title)
-        cal_description = QLabel(
-            "Positionsservon använder tre punkter: 0° min, 90° center och 180° max. "
-            "För 360°-servon betyder punkterna bakåt, stopp och framåt. "
-            "Ändra i 10 µs-steg, spara vid stopp och testa sedan en punkt i taget utan last."
-        )
-        cal_description.setObjectName("Description")
-        cal_description.setWordWrap(True)
-        calibration_layout.addWidget(cal_description)
+        cal_grid = QGridLayout()
+        cal_grid.setHorizontalSpacing(14)
+        cal_grid.setVerticalSpacing(14)
+        for index, channel in enumerate(SERVO_CHANNELS):
+            card = self._build_calibration_card(channel)
+            cal_grid.addWidget(card, index // 2, index % 2)
+        calibration_layout.addLayout(cal_grid)
+        calibration_layout.addStretch(1)
+        self.tabs.addTab(calibration_page, "02  CALIBRATION")
 
-        for channel in SERVO_CHANNELS:
-            calibration_column = QVBoxLayout()
-            calibration_column.setSpacing(8)
-            cal_row = QHBoxLayout()
-            cal_row.setSpacing(10)
-            title_label = QLabel(f"Kanal {channel} · {SERVO_CHANNELS[channel]}")
-            title_label.setMinimumWidth(75)
-            cal_row.addWidget(title_label)
-
-            continuous = channel in CONTINUOUS_SERVO_CHANNELS
-            default_calibration = (
-                DEFAULT_CONTINUOUS_CALIBRATION_US
-                if continuous
-                else DEFAULT_CALIBRATION_US
-            )
-            old_min = self.settings.value(
-                f"servo/{channel}/min_us", default_calibration[0], type=int
-            )
-            old_max = self.settings.value(
-                f"servo/{channel}/max_us", default_calibration[2], type=int
-            )
-            midpoint = (old_min + old_max) // 2
-            saved_center = self.settings.value(
-                f"servo/{channel}/center_us", midpoint, type=int
-            )
-            values = (old_min, saved_center, old_max)
-            # One-time migration for the old generic 1000/1500/2000 defaults.
-            # Keep deliberate user calibration values untouched.
-            migration_key = f"servo/{channel}/continuous_defaults_v2"
-            if (
-                continuous
-                and not self.settings.value(migration_key, False, type=bool)
-                and values == DEFAULT_CALIBRATION_US
-            ):
-                values = DEFAULT_CONTINUOUS_CALIBRATION_US
-                self.settings.setValue(f"servo/{channel}/min_us", values[0])
-                self.settings.setValue(f"servo/{channel}/center_us", values[1])
-                self.settings.setValue(f"servo/{channel}/max_us", values[2])
-            if continuous:
-                self.settings.setValue(migration_key, True)
-                self.settings.sync()
-            boxes: list[QSpinBox] = []
-            point_labels = (
-                ("Bakåt · min", "Stopp · center", "Framåt · max")
-                if channel in CONTINUOUS_SERVO_CHANNELS
-                else ("0° · min", "90° · center", "180° · max")
-            )
-            for angle, value, label_text in (
-                (MIN_ANGLE, values[0], point_labels[0]),
-                (DEFAULT_ANGLE, values[1], point_labels[1]),
-                (MAX_ANGLE, values[2], point_labels[2]),
-            ):
-                group = QVBoxLayout()
-                group.setSpacing(2)
-                label = QLabel(label_text)
-                label.setObjectName("Description")
-                group.addWidget(label)
-                box = QSpinBox()
-                box.setRange(PULSE_MIN_ALLOWED_US, PULSE_MAX_ALLOWED_US)
-                box.setSingleStep(CALIBRATION_STEP_US)
-                box.setSuffix(" µs")
-                box.setValue(max(PULSE_MIN_ALLOWED_US, min(PULSE_MAX_ALLOWED_US, value)))
-                box.setToolTip(
-                    f"Pulsbredden som används när målvinkeln är {angle}°. "
-                    f"Tillåtet programintervall: {PULSE_MIN_ALLOWED_US}–{PULSE_MAX_ALLOWED_US} µs."
-                )
-                group.addWidget(box)
-                cal_row.addLayout(group)
-                boxes.append(box)
-
-            calibration_column.addLayout(cal_row)
-            action_row = QHBoxLayout()
-            action_row.setSpacing(8)
-            action_row.addStretch(1)
-
-            self.cal_inputs[channel] = (boxes[0], boxes[1], boxes[2])
-            test_buttons: list[QPushButton] = []
-            for angle in (MIN_ANGLE, DEFAULT_ANGLE, MAX_ANGLE):
-                test_button = QPushButton(
-                    f"Testa {self._servo_command_label(channel, angle)}"
-                )
-                test_button.setObjectName("Quick")
-                test_button.setToolTip(
-                    "Skickar endast denna målvinkel. Ingen automatisk svepning utförs."
-                )
-                test_button.clicked.connect(
-                    lambda checked=False, ch=channel, a=angle: self._test_calibration_point(ch, a)
-                )
-                action_row.addWidget(test_button)
-                test_buttons.append(test_button)
-            self.cal_test_buttons[channel] = (
-                test_buttons[0], test_buttons[1], test_buttons[2]
-            )
-
-            cancel_button = QPushButton("Avbryt / 90°")
-            cancel_button.setObjectName("Quick")
-            cancel_button.setToolTip("Avbryt testläget och kommendera 90° på denna kanal")
-            cancel_button.clicked.connect(
-                lambda checked=False, ch=channel: self._cancel_calibration(ch)
-            )
-            action_row.addWidget(cancel_button)
-
-            apply_button = QPushButton("Spara / tillämpa")
-            apply_button.setToolTip(
-                "Sparar 0/90/180-punkterna på Mac och skickar dem till Arduino"
-            )
-            apply_button.clicked.connect(lambda checked=False, ch=channel: self._apply_calibration(ch))
-            action_row.addWidget(apply_button)
-            calibration_column.addLayout(action_row)
-            note = QLabel(
-                "Start: 1000 / 1500 / 2000 µs. För 360° är center stopp. Testa ändpunkter försiktigt; "
-                "backa direkt vid surr eller mekaniskt stopp."
-            )
-            note.setObjectName("Description")
-            note.setWordWrap(True)
-            self.cal_notes[channel] = note
-            calibration_column.addWidget(note)
-            calibration_layout.addLayout(calibration_column)
-
-        content.addWidget(calibration_panel)
-
-        future_panel = QFrame()
-        future_panel.setObjectName("Panel")
-        future_layout = QVBoxLayout(future_panel)
-        future_layout.setContentsMargins(20, 18, 20, 20)
-        future_layout.setSpacing(12)
-        future_title = QLabel("READY FOR EXPANSION")
-        future_title.setObjectName("Kicker")
-        future_layout.addWidget(future_title)
-        future_desc = QLabel("Sensorer visas live när Arduino skickar telemetri.")
-        future_desc.setObjectName("Description")
-        future_layout.addWidget(future_desc)
-        future_row = QHBoxLayout()
-        future_row.setSpacing(12)
-        for title, detail in (
-            ("LiDAR", "I²C  /  avstånd"),
-            ("FSR", "A0–A2  /  tryck"),
-            ("Slip detection", "framtida sensor"),
-        ):
-            tile = QFrame()
-            tile.setObjectName("FutureTile")
-            tile_layout = QVBoxLayout(tile)
-            tile_layout.setContentsMargins(15, 12, 15, 12)
-            name = QLabel(title)
-            name.setObjectName("SectionTitle")
-            tile_layout.addWidget(name)
-            if title == "FSR":
-                secondary = QLabel(
-                    f"{FSR_ADC_LABEL}  ·  VOLT 0,00–{FSR_ADC_REFERENCE_MV / 1000:.2f} V"
-                )
-                secondary.setObjectName("Description")
-                tile_layout.addWidget(secondary)
-                self.fsr_value_label = QLabel("Ej ansluten")
-                self.fsr_value_label.setObjectName("SectionTitle")
-                self.fsr_value_label.setToolTip(
-                    "Spänning beräknad från FSR på A1 med 5,00 V ADC-referens. "
-                    "Värdet är inte omräknat till kraft."
-                )
-                tile_layout.addWidget(self.fsr_value_label)
-                self.fsr_raw_label = QLabel("RAW –")
-                self.fsr_raw_label.setObjectName("Description")
-                tile_layout.addWidget(self.fsr_raw_label)
-            else:
-                secondary = QLabel(detail + "    ·    EJ AKTIV")
-                secondary.setObjectName("Description")
-                tile_layout.addWidget(secondary)
-            future_row.addWidget(tile, 1)
-        future_layout.addLayout(future_row)
-        content.addWidget(future_panel)
-        content.addStretch(1)
-
-        footer = QLabel(
-            "SERIAL 115200 BAUD    •    MÅLVINKEL, INTE UPPMÄTT SERVOPOSITION"
-        )
+        footer = QLabel("SERIAL 115200 BAUD  /  ANGLE IS COMMANDED, NOT MEASURED")
         footer.setObjectName("SmallCaps")
         content.addWidget(footer)
+
+    def _build_calibration_card(self, channel: int) -> QFrame:
+        panel = QFrame()
+        panel.setObjectName("CalibrationCard")
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(10)
+        header = QHBoxLayout()
+        number = QLabel(f"CH {channel:02d}")
+        number.setObjectName("ChannelTag")
+        header.addWidget(number)
+        name = QLabel(SERVO_CHANNELS[channel].upper())
+        name.setObjectName("ServoName")
+        header.addWidget(name)
+        header.addStretch(1)
+        layout.addLayout(header)
+
+        motion_panel = QFrame()
+        motion_panel.setObjectName("MotionPanel")
+        motion_layout = QVBoxLayout(motion_panel)
+        motion_layout.setContentsMargins(10, 8, 10, 8)
+        motion_layout.setSpacing(7)
+        motion_header = QHBoxLayout()
+        motion_title = QLabel("MOTION PROFILE · THIS SERVO")
+        motion_title.setObjectName("Kicker")
+        motion_header.addWidget(motion_title)
+        motion_header.addStretch(1)
+        motion_enabled = QCheckBox("Enabled")
+        motion_enabled.setToolTip(
+            "When disabled, commands move directly to the requested target without ramping."
+        )
+        motion_enabled.setChecked(self.settings.value(
+            f"motion/{channel}/enabled", True, type=bool
+        ))
+        motion_header.addWidget(motion_enabled)
+        motion_layout.addLayout(motion_header)
+        motion_fields = QHBoxLayout()
+        motion_fields.setSpacing(8)
+        speed_field = QVBoxLayout()
+        is_continuous = channel in CONTINUOUS_SERVO_CHANNELS
+        speed_label = QLabel("Pulse rate" if is_continuous else "Max speed")
+        speed_label.setObjectName("Description")
+        speed_field.addWidget(speed_label)
+        speed_box = QSpinBox()
+        speed_box.setRange(MIN_MAX_SPEED_DEG_S, MAX_MAX_SPEED_DEG_S)
+        speed_box.setSuffix(" cmd°/s" if is_continuous else " °/s")
+        old_speed = self.settings.value(
+            "motion/max_speed_deg_s", DEFAULT_MAX_SPEED_DEG_S, type=int
+        )
+        speed_box.setValue(self.settings.value(
+            f"motion/{channel}/max_speed_deg_s", old_speed, type=int
+        ))
+        speed_box.setEnabled(motion_enabled.isChecked())
+        speed_field.addWidget(speed_box)
+        motion_fields.addLayout(speed_field)
+        acceleration_field = QVBoxLayout()
+        acceleration_label = QLabel("Pulse accel." if is_continuous else "Acceleration")
+        acceleration_label.setObjectName("Description")
+        acceleration_field.addWidget(acceleration_label)
+        acceleration_box = QSpinBox()
+        acceleration_box.setRange(
+            MIN_ACCELERATION_DEG_S2, MAX_ACCELERATION_DEG_S2
+        )
+        acceleration_box.setSuffix(" cmd°/s²" if is_continuous else " °/s²")
+        old_acceleration = self.settings.value(
+            "motion/acceleration_deg_s2", DEFAULT_ACCELERATION_DEG_S2, type=int
+        )
+        acceleration_box.setValue(self.settings.value(
+            f"motion/{channel}/acceleration_deg_s2", old_acceleration, type=int
+        ))
+        acceleration_box.setEnabled(motion_enabled.isChecked())
+        acceleration_field.addWidget(acceleration_box)
+        motion_fields.addLayout(acceleration_field)
+        motion_fields.addStretch(1)
+        motion_layout.addLayout(motion_fields)
+        apply_profile = QPushButton("APPLY THIS SERVO PROFILE")
+        apply_profile.setObjectName("Quick")
+        apply_profile.clicked.connect(
+            lambda checked=False, ch=channel: self._apply_motion_profile(ch)
+        )
+        motion_layout.addWidget(apply_profile)
+        motion_note = QLabel(
+            "Disabled: target commands are sent directly, without a ramp."
+            if not motion_enabled.isChecked()
+            else (
+                "This ramps the pulse command, not rotation RPM. Releasing the direction button stops immediately."
+                if is_continuous
+                else "Ramps the commanded angle and eases into the target."
+            )
+        )
+        motion_note.setObjectName("Description")
+        motion_note.setWordWrap(True)
+        motion_layout.addWidget(motion_note)
+        layout.addWidget(motion_panel)
+        self.motion_enabled_boxes[channel] = motion_enabled
+        self.motion_speed_spins[channel] = speed_box
+        self.motion_acceleration_spins[channel] = acceleration_box
+        self.motion_notes[channel] = motion_note
+        motion_enabled.toggled.connect(
+            lambda enabled, ch=channel: self._motion_enabled_changed(ch, enabled)
+        )
+
+        continuous = channel in CONTINUOUS_SERVO_CHANNELS
+        defaults = DEFAULT_CONTINUOUS_CALIBRATION_US if continuous else DEFAULT_CALIBRATION_US
+        old_min = self.settings.value(f"servo/{channel}/min_us", defaults[0], type=int)
+        old_max = self.settings.value(f"servo/{channel}/max_us", defaults[2], type=int)
+        old_center = self.settings.value(f"servo/{channel}/center_us", (old_min + old_max) // 2, type=int)
+        values = (old_min, old_center, old_max)
+        migration_key = f"servo/{channel}/continuous_defaults_v2"
+        if continuous and not self.settings.value(migration_key, False, type=bool):
+            if values == DEFAULT_CALIBRATION_US:
+                values = defaults
+                for key, value in zip(("min_us", "center_us", "max_us"), values):
+                    self.settings.setValue(f"servo/{channel}/{key}", value)
+            self.settings.setValue(migration_key, True)
+            self.settings.sync()
+
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        groups: list[QSpinBox] = []
+        point_names = (
+            ("REVERSE · MIN", "STOP · CENTER", "FORWARD · MAX")
+            if continuous else ("0° · MIN", "90° · CENTER", "180° · MAX")
+        )
+        for value, point_name in zip(values, point_names):
+            group = QVBoxLayout()
+            group.setSpacing(4)
+            point_label = QLabel(point_name)
+            point_label.setObjectName("SmallCaps")
+            group.addWidget(point_label)
+            box = QSpinBox()
+            box.setRange(PULSE_MIN_ALLOWED_US, PULSE_MAX_ALLOWED_US)
+            box.setSingleStep(CALIBRATION_STEP_US)
+            box.setSuffix(" µs")
+            box.setValue(max(PULSE_MIN_ALLOWED_US, min(PULSE_MAX_ALLOWED_US, value)))
+            box.setToolTip(
+                f"Allowed software range: {PULSE_MIN_ALLOWED_US}–{PULSE_MAX_ALLOWED_US} µs"
+            )
+            group.addWidget(box)
+            row.addLayout(group)
+            groups.append(box)
+        layout.addLayout(row)
+        self.cal_inputs[channel] = (groups[0], groups[1], groups[2])
+
+        tests = QHBoxLayout()
+        test_buttons: list[QPushButton] = []
+        for angle, text in zip((MIN_ANGLE, DEFAULT_ANGLE, MAX_ANGLE), point_names):
+            button = QPushButton(f"TEST {text.split(' · ')[0]}")
+            button.setObjectName("Quick")
+            button.clicked.connect(
+                lambda checked=False, ch=channel, value=angle: self._test_calibration_point(ch, value)
+            )
+            tests.addWidget(button)
+            test_buttons.append(button)
+        self.cal_test_buttons[channel] = (test_buttons[0], test_buttons[1], test_buttons[2])
+        layout.addLayout(tests)
+
+        actions = QHBoxLayout()
+        cancel = QPushButton("CANCEL / 90°")
+        cancel.setObjectName("Quick")
+        cancel.clicked.connect(lambda checked=False, ch=channel: self._cancel_calibration(ch))
+        actions.addWidget(cancel)
+        save = QPushButton("SAVE / APPLY")
+        save.setObjectName("Primary")
+        save.clicked.connect(lambda checked=False, ch=channel: self._apply_calibration(ch))
+        actions.addWidget(save)
+        layout.addLayout(actions)
+        note = QLabel("START VALUES ARE A GUIDE. STOP IF THE SERVO BUZZES OR MEETS RESISTANCE.")
+        note.setObjectName("Description")
+        note.setWordWrap(True)
+        self.cal_notes[channel] = note
+        layout.addWidget(note)
+        return panel
 
     def refresh_ports(self) -> None:
         previous = self.ports.currentData()
@@ -417,7 +364,7 @@ class MainWindow(QMainWindow):
         for port in ports:
             self.ports.addItem(f"{port.device}  ·  {port.description}", port.device)
         if not ports:
-            self.ports.addItem("Ingen seriell port hittades", None)
+            self.ports.addItem("NO SERIAL PORT FOUND", None)
         if previous:
             index = self.ports.findData(previous)
             if index >= 0:
@@ -432,24 +379,21 @@ class MainWindow(QMainWindow):
 
     def _toggle_connection(self) -> None:
         if self.worker is not None:
-            self.connection_note.setText("Kopplar från …")
+            self.connection_note.setText("DISCONNECTING …")
             self.connect_button.setEnabled(False)
             self.worker.stop(self._continuous_stop_commands())
             return
-        selected_port = self.ports.currentData()
-        if not selected_port:
+        port = self.ports.currentData()
+        if not port:
             return
         self.arduino_ready = False
         self._last_error = ""
-        self.status.setText("●  CONNECTING")
-        self.status.setObjectName("Waiting")
-        self.status.style().unpolish(self.status)
-        self.status.style().polish(self.status)
-        self.connection_note.setText("Öppnar port och väntar på Arduino …")
+        self._set_status("Waiting", "■ CONNECTING")
+        self.connection_note.setText("OPENING PORT AND WAITING FOR ARDUINO …")
         self.connect_button.setEnabled(False)
         self.ports.setEnabled(False)
         self.refresh_button.setEnabled(False)
-        self.worker = SerialWorker(selected_port, self)
+        self.worker = SerialWorker(port, self)
         self.worker.port_opened.connect(self._port_opened)
         self.worker.ready.connect(self._arduino_is_ready)
         self.worker.received.connect(self._received)
@@ -458,177 +402,109 @@ class MainWindow(QMainWindow):
         self.worker.start()
 
     def _port_opened(self, port: str) -> None:
-        self.connection_note.setText(f"Port öppen: {port}. Väntar på Arduino READY …")
-        self.connect_button.setText("Koppla från")
+        self.connection_note.setText(f"PORT OPEN: {port}  /  WAITING FOR READY …")
+        self.connect_button.setText("DISCONNECT")
         self.connect_button.setObjectName("Disconnect")
-        self.connect_button.style().unpolish(self.connect_button)
-        self.connect_button.style().polish(self.connect_button)
+        self._repolish(self.connect_button)
         self.connect_button.setEnabled(True)
 
     def _arduino_is_ready(self) -> None:
         if not self.worker or not self.worker.isRunning():
             return
         self.arduino_ready = True
-        self.status.setText("●  CONNECTED")
-        self.status.setObjectName("Good")
-        self.status.style().unpolish(self.status)
-        self.status.style().polish(self.status)
-        self.connection_note.setText("Arduino ansluten. Skicka nya vinklar med reglagen nedan.")
-        # Apply saved calibration before sending any angles. The serial
-        # worker guarantees FIFO ordering for messages queued together.
-        for ch in self.cards:
-            low, center, high = self._calibration_values(ch)
-            self.worker.send(set_calibration(ch, low, center, high))
-            # Always start a new connection at the safe default. Do not replay
-            # a stale GUI target and cause a surprise move after USB reconnect.
-            self.cards[ch].set_angle(DEFAULT_ANGLE)
-            self.pending[ch] = DEFAULT_ANGLE
-        # Queue the startup SET commands explicitly before JOYAREA/JOY. The
-        # normal pending timer is intentionally bypassed here so joystick
-        # enable cannot overtake the safe 90° synchronization on a reconnect.
-        for ch in self.cards:
-            self.worker.send(set_angle(ch, DEFAULT_ANGLE))
-        self.pending.clear()
-        # Send this after the manual startup synchronization because an
-        # explicit SET is the arbitration event that pauses joystick control.
-        self.worker.send(set_joystick_area(self.joystick_area))
-        self.worker.send(set_joystick_enabled(self.joystick_enabled_checkbox.isChecked()))
-        self.connection_note.setText(
-            "Arduino ansluten. Servona hålls på 90° tills du väljer en ny målvinkel."
-        )
+        self._last_pong = time.monotonic()
+        self._set_status("Good", "■ CONNECTED")
+        self.connection_note.setText("ARDUINO READY. SERVO CONTROLS ARE ACTIVE.")
+        for channel in self.cards:
+            low, center, high = self._calibration_values(channel)
+            self.worker.send(set_calibration(channel, low, center, high))
+            self.worker.send(set_motion_profile(
+                channel,
+                self.motion_enabled_boxes[channel].isChecked(),
+                self.motion_speed_spins[channel].value(),
+                self.motion_acceleration_spins[channel].value(),
+            ))
+            self.cards[channel].set_angle(DEFAULT_ANGLE)
+            self.pending[channel] = DEFAULT_ANGLE
+        self._flush_pending()
 
-    def _joystick_enabled_changed(self, enabled: bool) -> None:
-        self.settings.setValue("joystick/enabled", enabled)
+    def _apply_motion_profile(self, channel: int) -> None:
+        enabled = self.motion_enabled_boxes[channel].isChecked()
+        speed = self.motion_speed_spins[channel].value()
+        acceleration = self.motion_acceleration_spins[channel].value()
+        self.settings.setValue(f"motion/{channel}/enabled", enabled)
+        self.settings.setValue(f"motion/{channel}/max_speed_deg_s", speed)
+        self.settings.setValue(f"motion/{channel}/acceleration_deg_s2", acceleration)
         self.settings.sync()
+        if self.settings.status() != QSettings.Status.NoError:
+            self.motion_notes[channel].setText("Could not save this motion profile.")
+            return
         if self.arduino_ready and self.worker:
-            self.worker.send(set_joystick_enabled(enabled))
-        if not enabled:
-            self.joystick_status.setText("● AVSTÄNGD")
-            self.joystick_status.setObjectName("Off")
-            self._repolish(self.joystick_status)
-
-    def _joystick_area_changed(self, fingers: bool) -> None:
-        self.joystick_area = 1 if fingers else 0
-        self.joystick_mode = 0
-        self.settings.setValue("joystick/area", self.joystick_area)
-        self.settings.sync()
-        if self.arduino_ready and self.worker:
-            # The firmware stops the previous group and requires neutral before
-            # accepting movement in the newly selected group.
-            self.worker.send(set_joystick_area(self.joystick_area))
-        group = JOYSTICK_GROUPS[self.joystick_area]
-        self.joystick_mode_label.setText(
-            f"{group['name']} · välj läge med joystick-knappen"
-        )
-
-    @staticmethod
-    def _joystick_direction(speed: int) -> str:
-        if speed == 0:
-            return "stopp"
-        return f"{('+' if speed > 0 else '')}{speed}"
-
-    def _update_joystick_display(
-        self,
-        enabled: bool,
-        area: int,
-        mode: int,
-        raw_x: int,
-        raw_y: int,
-        speed_x: int,
-        speed_y: int,
-        armed: bool,
-    ) -> None:
-        self.joystick_seen = True
-        if area in range(len(JOYSTICK_GROUPS)):
-            self.joystick_area = area
-        group = JOYSTICK_GROUPS[self.joystick_area]
-        modes = group["modes"]
-        if 0 <= mode < len(modes):
-            self.joystick_mode = mode
-        mode_info = modes[self.joystick_mode]
-        x_channels = mode_info["x_channels"]
-        y_channels = mode_info["y_channels"]
-        channel_names = lambda channels: ", ".join(
-            f"{SERVO_CHANNELS[channel]} · CH{channel}" for channel in channels
-        )
-        self.joystick_mode_label.setText(
-            f"{group['name']} · {self.joystick_mode + 1} / {len(modes)} · "
-            f"{mode_info['name']}"
-        )
-        self.joystick_x_label.setText(
-            f"{channel_names(x_channels)} · ADC {raw_x} · "
-            f"{self._joystick_direction(speed_x)}"
-        )
-        self.joystick_y_label.setText(
-            f"{channel_names(y_channels) if y_channels else 'Ej använd i detta fingerläge'} "
-            f"· ADC {raw_y} · {self._joystick_direction(speed_y)}"
-        )
-        self.joystick_area_checkbox.blockSignals(True)
-        self.joystick_area_checkbox.setChecked(self.joystick_area == 1)
-        self.joystick_area_checkbox.blockSignals(False)
-        self.joystick_enabled_checkbox.blockSignals(True)
-        self.joystick_enabled_checkbox.setChecked(enabled)
-        self.joystick_enabled_checkbox.blockSignals(False)
-        if not enabled:
-            status_text, status_object = "● AVSTÄNGD", "Off"
-        elif not armed:
-            status_text, status_object = "● NEUTRAL KRÄVS", "Waiting"
+            self.worker.send(set_motion_profile(channel, enabled, speed, acceleration))
+            self.motion_notes[channel].setText(self._motion_profile_message(
+                channel, enabled, speed, acceleration, active=True
+            ))
         else:
-            status_text, status_object = "● AKTIV", "Good"
-        self.joystick_status.setText(status_text)
-        self.joystick_status.setObjectName(status_object)
-        self._repolish(self.joystick_status)
-        for channel, card in self.cards.items():
-            axis = ""
-            if channel in x_channels:
-                axis = "X"
-            if channel in y_channels:
-                axis = "Y"
-            card.set_joystick_axis(axis)
+            self.motion_notes[channel].setText(self._motion_profile_message(
+                channel, enabled, speed, acceleration, active=False
+            ))
+
+    def _motion_enabled_changed(self, channel: int, enabled: bool) -> None:
+        self.motion_speed_spins[channel].setEnabled(enabled)
+        self.motion_acceleration_spins[channel].setEnabled(enabled)
+        self._apply_motion_profile(channel)
 
     @staticmethod
-    def _repolish(widget: QWidget) -> None:
-        widget.style().unpolish(widget)
-        widget.style().polish(widget)
-
-    @staticmethod
-    def _servo_command_label(channel: int, angle: int) -> str:
+    def _motion_profile_message(
+        channel: int, enabled: bool, speed: int, acceleration: int, active: bool
+    ) -> str:
+        status = "Active" if active else "Saved for the next connection"
+        if not enabled:
+            return f"{status}: motion ramp disabled; targets are sent directly."
         if channel in CONTINUOUS_SERVO_CHANNELS:
-            return {MIN_ANGLE: "bakåt", DEFAULT_ANGLE: "stopp", MAX_ANGLE: "framåt"}[angle]
-        return f"{angle}°"
+            unit = "cmd°/s pulse rate"
+            acceleration_unit = "cmd°/s² pulse acceleration"
+        else:
+            unit = "°/s max speed"
+            acceleration_unit = "°/s² acceleration"
+        return (
+            f"{status}: {speed} {unit}, {acceleration} {acceleration_unit}."
+        )
+
+    def _heartbeat(self) -> None:
+        if not self.worker or not self.arduino_ready:
+            return
+        self.worker.send("PING\n")
+        if time.monotonic() - self._last_pong > 4.0:
+            self._set_status("Bad", "■ NO RESPONSE")
+            self.connection_note.setText(
+                "ARDUINO IS NOT RESPONDING TO PING. DISCONNECT AND RECONNECT."
+            )
+            for card in self.cards.values():
+                card.set_offline()
 
     def _apply_calibration(self, channel: int) -> None:
         low, center, high = self._calibration_values(channel)
-        calibration = ServoCalibration(low, center, high)
-        validation_error = calibration.validate()
-        if validation_error:
-            self.cal_notes[channel].setText(f"Fel: {validation_error}")
+        error = ServoCalibration(low, center, high).validate()
+        if error:
+            self.cal_notes[channel].setText(f"ERROR: {error}")
             return
         if self.arduino_ready and self.cards[channel].angle() != DEFAULT_ANGLE:
-            self.cal_notes[channel].setText(
-                f"Sätt först denna servo till {self._servo_command_label(channel, DEFAULT_ANGLE)} "
-                f"eller tryck Avbryt / {self._servo_command_label(channel, DEFAULT_ANGLE)}. "
-                "Kalibrering tillämpas inte under rörelse."
-            )
+            self.cal_notes[channel].setText("MOVE THE SERVO TO 90° / STOP BEFORE CALIBRATING.")
             return
-        self.settings.setValue(f"servo/{channel}/min_us", low)
-        self.settings.setValue(f"servo/{channel}/center_us", center)
-        self.settings.setValue(f"servo/{channel}/max_us", high)
+        for key, value in zip(("min_us", "center_us", "max_us"), (low, center, high)):
+            self.settings.setValue(f"servo/{channel}/{key}", value)
         self.settings.sync()
         if self.settings.status() != QSettings.Status.NoError:
-            self.cal_notes[channel].setText("Kunde inte spara kalibreringen på Mac.")
+            self.cal_notes[channel].setText("COULD NOT SAVE THE CALIBRATION.")
             return
         if self.arduino_ready and self.worker:
-            # CAL itself does not move the servo. Re-sending 90° applies the
-            # new center while the calibration procedure is in its safe pose.
             self.worker.send(set_calibration(channel, low, center, high))
             self.worker.send(set_angle(channel, DEFAULT_ANGLE))
-            self.cal_notes[channel].setText(
-                f"✓ Aktiv: {low} / {center} / {high} µs. Testa sedan en punkt i taget."
-            )
+            self.cal_notes[channel].setText(f"ACTIVE: {low} / {center} / {high} µs.")
         else:
             self.cal_notes[channel].setText(
-                f"Sparat: {low} / {center} / {high} µs. Används vid nästa anslutning."
+                f"SAVED: {low} / {center} / {high} µs. SENT NEXT TIME ARDUINO CONNECTS."
             )
 
     def _calibration_values(self, channel: int) -> tuple[int, int, int]:
@@ -637,28 +513,20 @@ class MainWindow(QMainWindow):
 
     def _test_calibration_point(self, channel: int, angle: int) -> None:
         if not self.arduino_ready:
-            self.cal_notes[channel].setText(
-                "Anslut Arduino innan du testar en kalibreringspunkt."
-            )
+            self.cal_notes[channel].setText("CONNECT THE ARDUINO BEFORE TESTING.")
             return
-        # A button sends one explicit target only; there is no automatic sweep.
         self.cards[channel].set_angle(angle)
         self.pending[channel] = angle
         low, center, high = self._calibration_values(channel)
         self.cal_notes[channel].setText(
-            f"Testar kommenderat {self._servo_command_label(channel, angle)}. "
-            f"Aktiv mapping: {low} / {center} / {high} µs."
+            f"TESTING {self._servo_command_label(channel, angle)}. ACTIVE MAP: {low} / {center} / {high} µs."
         )
 
     def _cancel_calibration(self, channel: int) -> None:
         self.cards[channel].set_angle(DEFAULT_ANGLE)
         if self.arduino_ready:
             self.pending[channel] = DEFAULT_ANGLE
-        self.cal_notes[channel].setText(
-            f"Kalibreringstest avbruten; kanal kommenderad till "
-            f"{self._servo_command_label(channel, DEFAULT_ANGLE)}. "
-            "Osparade pulsändringar är inte aktiva."
-        )
+        self.cal_notes[channel].setText("TEST CANCELLED. CHANNEL COMMANDED TO 90° / STOP.")
 
     def _servo_changed(self, channel: int, angle: int) -> None:
         self.pending[channel] = angle
@@ -666,115 +534,66 @@ class MainWindow(QMainWindow):
     def _flush_pending(self) -> None:
         if not self.arduino_ready or not self.worker:
             return
-        to_send = self.pending
+        queued = self.pending
         self.pending = {}
-        for channel, angle in to_send.items():
+        for channel, angle in queued.items():
             self.worker.send(set_angle(channel, angle))
 
     def _received(self, message: str) -> None:
+        if message == "PONG":
+            self._last_pong = time.monotonic()
+            if self.worker and self.arduino_ready and self.status.objectName() == "Bad":
+                self.arduino_ready = True
+                self._set_status("Good", "■ CONNECTED")
+                self.connection_note.setText("ARDUINO IS RESPONDING AGAIN.")
+            return
         kind, values = parse_line(message)
-        if kind == "FSR" and len(values) in (2, 3):
+        if kind == "ACK" and len(values) == 2:
             try:
-                channel, raw_value = int(values[0]), int(values[1])
-                millivolts = (
-                    int(values[2])
-                    if len(values) == 3
-                    else (raw_value * FSR_ADC_REFERENCE_MV + FSR_ADC_MAX // 2) // FSR_ADC_MAX
-                )
-            except ValueError:
-                return
-            if (
-                channel == FSR_ADC_CHANNEL
-                and 0 <= raw_value <= FSR_ADC_MAX
-                and 0 <= millivolts <= FSR_ADC_REFERENCE_MV
-            ):
-                self._update_fsr_display(raw_value, millivolts)
-        elif kind == "JOY" and len(values) in (7, 8):
-            try:
-                numbers = list(map(int, values))
-            except ValueError:
-                return
-            if len(numbers) == 8:
-                area, enabled, mode, raw_x, raw_y, speed_x, speed_y, armed = numbers
-            else:
-                # Compatibility with firmware from before the area selector.
-                area = 0
-                enabled, mode, raw_x, raw_y, speed_x, speed_y, armed = numbers
-            self._update_joystick_display(
-                bool(enabled), area, mode, raw_x, raw_y, speed_x, speed_y, bool(armed)
-            )
-        elif kind in ("ACK", "STATE") and len(values) == 2:
-            try:
-                channel, angle = int(values[0]), int(values[1])
+                channel, angle = map(int, values)
             except ValueError:
                 return
             if channel in self.cards:
                 self.cards[channel].set_ack(angle)
-        elif kind == "ACKCAL" and len(values) in (3, 4):
+        elif kind == "ACKCAL" and len(values) == 4:
             try:
-                numbers = list(map(int, values))
+                channel, low, center, high = map(int, values)
             except ValueError:
                 return
-            channel = numbers[0]
             if channel in self.cal_notes:
-                if len(numbers) == 4:
-                    _, low, center, high = numbers
-                    self.cal_notes[channel].setText(
-                        f"✓ Arduino använder {low} / {center} / {high} µs."
-                    )
-                else:
-                    # Compatibility with the previous firmware response.
-                    _, low, high = numbers
-                    self.cal_notes[channel].setText(
-                        f"✓ Äldre firmware använder {low}–{high} µs; ladda upp ny firmware."
-                    )
+                self.cal_notes[channel].setText(
+                    f"ARDUINO CONFIRMED: {low} / {center} / {high} µs."
+                )
+        elif kind == "ACKMOTION" and len(values) == 4:
+            try:
+                channel, enabled, speed, acceleration = map(int, values)
+            except ValueError:
+                return
+            if channel in self.motion_notes:
+                self.motion_notes[channel].setText(self._motion_profile_message(
+                    channel, bool(enabled), speed, acceleration, active=True
+                ))
         elif kind == "ERR":
-            self.connection_note.setText(f"Arduino: {','.join(values)}")
-
-    def _update_fsr_display(self, raw_value: int, millivolts: int) -> None:
-        self.fsr_seen = True
-        volts = f"{millivolts / 1000:.2f}".replace(".", ",")
-        self.fsr_value_label.setText(f"{volts} V")
-        self.fsr_raw_label.setText(f"RAW {raw_value} / {FSR_ADC_MAX}")
-        self.fsr_value_label.setStyleSheet("color: #5BDAC9;")
+            self.connection_note.setText(f"ARDUINO: {','.join(values)}")
 
     def _failed(self, reason: str) -> None:
         self._last_error = reason
-        self.connection_note.setText(f"Anslutningsfel: {reason}")
-        self.status.setText("●  ERROR")
-        self.status.setObjectName("Bad")
-        self.status.style().unpolish(self.status)
-        self.status.style().polish(self.status)
+        self.connection_note.setText(f"CONNECTION ERROR: {reason}")
+        self._set_status("Bad", "■ ERROR")
 
     def _worker_finished(self) -> None:
         self.arduino_ready = False
         self.pending.clear()
-        self.joystick_seen = False
-        self.fsr_seen = False
-        self.joystick_status.setText("● EJ ANSLUTEN")
-        self.joystick_status.setObjectName("Off")
-        self._repolish(self.joystick_status)
-        self.joystick_mode_label.setText("Väntar på Arduino")
-        self.joystick_x_label.setText("–")
-        self.joystick_y_label.setText("–")
-        self.fsr_value_label.setText("Ej ansluten")
-        self.fsr_raw_label.setText("RAW –")
-        self.fsr_value_label.setStyleSheet("color: #F1F6FD;")
         for card in self.cards.values():
-            card.set_joystick_axis("")
             card.reset_continuous_state()
-        for card in self.cards.values():
             card.set_offline()
-        self.status.setText("●  ERROR" if self._last_error else "●  OFFLINE")
-        self.status.setObjectName("Bad" if self._last_error else "Off")
-        self.status.style().unpolish(self.status)
-        self.status.style().polish(self.status)
+        self._set_status("Bad" if self._last_error else "Off",
+                         "■ ERROR" if self._last_error else "■ OFFLINE")
         if not self._last_error:
-            self.connection_note.setText("Frånkopplad. Servo-reglagen behåller sina målvinklar.")
-        self.connect_button.setText("Anslut")
+            self.connection_note.setText("DISCONNECTED. SERVO TARGETS ARE SAVED IN THE APP.")
+        self.connect_button.setText("CONNECT")
         self.connect_button.setObjectName("Primary")
-        self.connect_button.style().unpolish(self.connect_button)
-        self.connect_button.style().polish(self.connect_button)
+        self._repolish(self.connect_button)
         self.ports.setEnabled(True)
         self.refresh_button.setEnabled(True)
         if self.worker:
@@ -785,15 +604,29 @@ class MainWindow(QMainWindow):
     def _center_all(self) -> None:
         for card in self.cards.values():
             card.set_angle(DEFAULT_ANGLE)
-        # Even if a card already showed 90°, ask Arduino to center it.
         if self.arduino_ready:
-            for channel in self.cards:
-                self.pending[channel] = DEFAULT_ANGLE
+            self.pending = {channel: DEFAULT_ANGLE for channel in self.cards}
+
+    @staticmethod
+    def _servo_command_label(channel: int, angle: int) -> str:
+        if channel in CONTINUOUS_SERVO_CHANNELS:
+            return {MIN_ANGLE: "REVERSE", DEFAULT_ANGLE: "STOP", MAX_ANGLE: "FORWARD"}[angle]
+        return f"{angle}°"
 
     def _continuous_stop_commands(self) -> tuple[str, ...]:
         if not self.arduino_ready:
             return ()
         return tuple(set_angle(channel, DEFAULT_ANGLE) for channel in CONTINUOUS_SERVO_CHANNELS)
+
+    def _set_status(self, style: str, text: str) -> None:
+        self.status.setObjectName(style)
+        self.status.setText(text)
+        self._repolish(self.status)
+
+    @staticmethod
+    def _repolish(widget: QWidget) -> None:
+        widget.style().unpolish(widget)
+        widget.style().polish(widget)
 
     def closeEvent(self, event) -> None:
         if self.worker is not None:
