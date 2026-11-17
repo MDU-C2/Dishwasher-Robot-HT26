@@ -48,9 +48,12 @@ class SerialWorker(QThread):
                 timeout=0.05,
                 write_timeout=0.25,
             ) as device:
+                device.reset_input_buffer()
+                device.reset_output_buffer()
                 self.port_opened.emit(self.port)
                 is_ready = False
-                last_hello = 0.0
+                last_hello = time.monotonic() - 0.8
+                max_writes_per_pass = 4
                 while self._running.is_set() or not self._outbox.empty():
                     # Opening the USB serial port may reset an Arduino.
                     # Keep requesting READY until the board has booted.
@@ -59,26 +62,50 @@ class SerialWorker(QThread):
                         device.write(b"HELLO\n")
                         last_hello = now
 
+                    writes_this_pass = 0
                     try:
-                        while True:
+                        while not self._running.is_set() or writes_this_pass < max_writes_per_pass:
                             message = self._outbox.get_nowait()
                             if is_ready:
                                 device.write(message.encode("ascii"))
+                                writes_this_pass += 1
                     except queue.Empty:
                         pass
 
                     if not self._running.is_set() and self._outbox.empty():
                         break
-                    raw = device.readline() if self._running.is_set() else b""
-                    if not raw:
-                        continue
-                    line = raw.decode("utf-8", errors="replace").strip()
-                    if not line:
-                        continue
-                    self.received.emit(line)
-                    if line.startswith("READY,"):
-                        is_ready = True
-                        self.ready.emit()
+
+                    lines_to_process: list[bytes] = []
+                    if self._outbox.empty() or device.in_waiting > 0:
+                        raw = device.readline()
+                        if raw:
+                            lines_to_process.append(raw)
+                        while device.in_waiting > 0:
+                            extra = device.readline()
+                            if not extra:
+                                break
+                            lines_to_process.append(extra)
+                    elif is_ready:
+                        # Let the Arduino drain its UART buffer between 4-command bursts.
+                        time.sleep(0.005)
+
+                    fatal_error = False
+                    for raw in lines_to_process:
+                        line = raw.decode("utf-8", errors="replace").strip()
+                        if not line:
+                            continue
+                        self.received.emit(line)
+                        if line.startswith("READY,"):
+                            is_ready = True
+                            self.ready.emit()
+                        elif line.startswith("ERR,PCA9685_NOT_FOUND"):
+                            self.failed.emit(
+                                "PCA9685 not found on I2C (0x40). Check wiring and power."
+                            )
+                            fatal_error = True
+                            break
+                    if fatal_error:
+                        break
         except (serial.SerialException, OSError) as exc:
             if self._running.is_set():
                 self.failed.emit(str(exc))

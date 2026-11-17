@@ -8,12 +8,11 @@ SERVO_CHANNELS = {
     2: "Servo 03",
     3: "Servo 04",
     4: "Servo 05",
-    5: "Servo 06",
-    6: "Finger 1",
-    7: "Finger 2",
-    8: "Finger 3",
+    5: "Finger 1",
+    6: "Finger 2",
+    7: "Finger 3",
 }
-CONTINUOUS_SERVO_CHANNELS = (6, 7, 8)
+CONTINUOUS_SERVO_CHANNELS = (5, 6, 7)
 DEFAULT_ANGLE = 90
 MIN_ANGLE = 0
 MAX_ANGLE = 180

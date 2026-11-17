@@ -2,7 +2,7 @@
 // Board: Arduino UNO R4 WiFi; PCA9685 default I2C address: 0x40.
 // USB serial protocol at 115200 baud:
 //   HELLO / PING
-//   SET,<channel>,<angle>     channel 0..8, angle 0..180
+//   SET,<channel>,<angle>     channel 0..7, angle 0..180
 //   CAL,<channel>,<min_us>,<center_us>,<max_us>
 //   MOTION,<channel>,<enabled>,<max_speed_deg_s>,<acceleration_deg_s2>
 //   CENTER
@@ -16,13 +16,16 @@
 constexpr uint8_t PCA9685_ADDRESS = 0x40;
 constexpr uint32_t PCA9685_OSCILLATOR_HZ = 25000000UL;
 constexpr uint8_t SERVO_PWM_FREQUENCY_HZ = 50;
-constexpr uint8_t SERVO_COUNT = 9;
-constexpr uint8_t SERVO_CHANNELS[SERVO_COUNT] = {0, 1, 2, 3, 4, 5, 6, 7, 8};
-constexpr uint8_t CONTINUOUS_SERVO_FIRST_CHANNEL = 6;
+constexpr uint8_t SERVO_COUNT = 8;
+constexpr uint8_t SERVO_CHANNELS[SERVO_COUNT] = {0, 1, 2, 3, 4, 5, 6, 7};
+constexpr uint8_t CONTINUOUS_SERVO_FIRST_CHANNEL = 5;
 constexpr int DEFAULT_ANGLE = 90;
 constexpr unsigned long MOTION_UPDATE_MS = 20;
+constexpr unsigned long SERIAL_LINE_TIMEOUT_MS = 500;
 constexpr int PULSE_MIN_ALLOWED_US = 600;
 constexpr int PULSE_MAX_ALLOWED_US = 2400;
+constexpr uint16_t PULSE_UNSET = 0;
+constexpr uint16_t PULSE_FULL_OFF = 0xFFFF;
 
 Adafruit_PWMServoDriver pca(PCA9685_ADDRESS);
 
@@ -34,16 +37,21 @@ struct ServoConfig {
 
 ServoConfig servoConfig[SERVO_COUNT] = {
   {1000, 1500, 2000}, {1000, 1500, 2000}, {1000, 1500, 2000},
-  {1000, 1500, 2000}, {1000, 1500, 2000}, {1000, 1500, 2000},
+  {1000, 1500, 2000}, {1000, 1500, 2000},
   {900, 1500, 2100}, {900, 1500, 2100}, {900, 1500, 2100},
 };
-int targets[SERVO_COUNT] = {90, 90, 90, 90, 90, 90, 90, 90, 90};
-float currentAngles[SERVO_COUNT] = {90, 90, 90, 90, 90, 90, 90, 90, 90};
-float currentVelocities[SERVO_COUNT] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
-bool motionProfileEnabled[SERVO_COUNT] = {true, true, true, true, true, true, true, true, true};
-int maxSpeedDegPerSecond[SERVO_COUNT] = {60, 60, 60, 60, 60, 60, 60, 60, 60};
-int accelerationDegPerSecondSquared[SERVO_COUNT] = {120, 120, 120, 120, 120, 120, 120, 120, 120};
+int targets[SERVO_COUNT] = {90, 90, 90, 90, 90, 90, 90, 90};
+float currentAngles[SERVO_COUNT] = {90, 90, 90, 90, 90, 90, 90, 90};
+float currentVelocities[SERVO_COUNT] = {0, 0, 0, 0, 0, 0, 0, 0};
+bool motionProfileEnabled[SERVO_COUNT] = {true, true, true, true, true, true, true, true};
+int maxSpeedDegPerSecond[SERVO_COUNT] = {60, 60, 60, 60, 60, 60, 60, 60};
+int accelerationDegPerSecondSquared[SERVO_COUNT] = {120, 120, 120, 120, 120, 120, 120, 120};
+uint16_t lastPulseUs[SERVO_COUNT] = {
+  PULSE_UNSET, PULSE_UNSET, PULSE_UNSET, PULSE_UNSET,
+  PULSE_UNSET, PULSE_UNSET, PULSE_UNSET, PULSE_UNSET,
+};
 unsigned long lastMotionUpdateAt = 0;
+unsigned long lastSerialByteAt = 0;
 char commandBuffer[96];
 uint8_t bufferIndex = 0;
 
@@ -61,9 +69,41 @@ int findServoIndex(long channel) {
   return -1;
 }
 
+bool isContinuousServo(int index) {
+  return index >= 0 && index < SERVO_COUNT &&
+         SERVO_CHANNELS[index] >= CONTINUOUS_SERVO_FIRST_CHANNEL;
+}
+
+void recoverI2CBus() {
+#if defined(SDA) && defined(SCL)
+  // Clock out any stuck slave transaction before Wire takes over the pins.
+  pinMode(SDA, INPUT_PULLUP);
+  pinMode(SCL, INPUT_PULLUP);
+  delayMicroseconds(10);
+  if (digitalRead(SDA) == LOW) {
+    for (uint8_t i = 0; i < 9 && digitalRead(SDA) == LOW; ++i) {
+      pinMode(SCL, OUTPUT);
+      digitalWrite(SCL, LOW);
+      delayMicroseconds(10);
+      pinMode(SCL, INPUT_PULLUP);
+      delayMicroseconds(10);
+    }
+    pinMode(SDA, OUTPUT);
+    digitalWrite(SDA, LOW);
+    delayMicroseconds(10);
+    pinMode(SCL, INPUT_PULLUP);
+    delayMicroseconds(10);
+    pinMode(SDA, INPUT_PULLUP);
+    delayMicroseconds(10);
+  }
+#endif
+}
+
 void stopContinuousServo(int index) {
   // Full-off stops the continuous rotation servos without a center pulse.
+  if (lastPulseUs[index] == PULSE_FULL_OFF) return;
   pca.setPWM(SERVO_CHANNELS[index], 0, 4096);
+  lastPulseUs[index] = PULSE_FULL_OFF;
 }
 
 void writePulseForAngle(int index, float angle) {
@@ -75,13 +115,16 @@ void writePulseForAngle(int index, float angle) {
     pulseUs = cal.centerUs +
               ((float)(cal.maxUs - cal.centerUs) * (angle - DEFAULT_ANGLE) / 90.0f);
   }
-  pca.writeMicroseconds(SERVO_CHANNELS[index], (uint16_t)lroundf(pulseUs));
+  const uint16_t targetUs = (uint16_t)lroundf(pulseUs);
+  if (lastPulseUs[index] == targetUs) return;
+  pca.writeMicroseconds(SERVO_CHANNELS[index], targetUs);
+  lastPulseUs[index] = targetUs;
 }
 
 void writeTargetImmediately(int index) {
   currentAngles[index] = targets[index];
   currentVelocities[index] = 0;
-  if (index >= CONTINUOUS_SERVO_FIRST_CHANNEL && targets[index] == DEFAULT_ANGLE) {
+  if (isContinuousServo(index) && targets[index] == DEFAULT_ANGLE) {
     stopContinuousServo(index);
   } else {
     writePulseForAngle(index, targets[index]);
@@ -91,7 +134,7 @@ void writeTargetImmediately(int index) {
 void setTarget(int index, int angle) {
   targets[index] = angle;
   // Continuous servos always stop immediately when the hold button is released.
-  if (index >= CONTINUOUS_SERVO_FIRST_CHANNEL && angle == DEFAULT_ANGLE) {
+  if (isContinuousServo(index) && angle == DEFAULT_ANGLE) {
     writeTargetImmediately(index);
   } else if (!motionProfileEnabled[index]) {
     writeTargetImmediately(index);
@@ -111,13 +154,19 @@ void updateMotion(unsigned long now) {
     if (distance < 0.02f && fabsf(currentVelocities[index]) < 0.1f) {
       currentAngles[index] = targets[index];
       currentVelocities[index] = 0;
+      if (isContinuousServo(index) && targets[index] == DEFAULT_ANGLE) {
+        stopContinuousServo(index);
+      }
       continue;
     }
 
     const float direction = delta >= 0 ? 1.0f : -1.0f;
-    const float brakingSpeed = sqrtf(
-        2.0f * accelerationDegPerSecondSquared[index] * distance);
-    const float desiredSpeed = direction * fminf(maxSpeedDegPerSecond[index], brakingSpeed);
+    float desiredSpeed = direction * (float)maxSpeedDegPerSecond[index];
+    if (!isContinuousServo(index)) {
+      const float brakingSpeed = sqrtf(
+          2.0f * accelerationDegPerSecondSquared[index] * distance);
+      desiredSpeed = direction * fminf((float)maxSpeedDegPerSecond[index], brakingSpeed);
+    }
     const float maxVelocityChange = accelerationDegPerSecondSquared[index] * dt;
     float velocityChange = desiredSpeed - currentVelocities[index];
     if (velocityChange > maxVelocityChange) velocityChange = maxVelocityChange;
@@ -131,7 +180,11 @@ void updateMotion(unsigned long now) {
     } else {
       currentAngles[index] = nextAngle;
     }
-    writePulseForAngle(index, currentAngles[index]);
+    if (isContinuousServo(index) && currentAngles[index] == DEFAULT_ANGLE) {
+      stopContinuousServo(index);
+    } else {
+      writePulseForAngle(index, currentAngles[index]);
+    }
   }
 }
 
@@ -148,7 +201,7 @@ void centerAll() {
     targets[i] = DEFAULT_ANGLE;
     currentAngles[i] = DEFAULT_ANGLE;
     currentVelocities[i] = 0;
-    if (i >= CONTINUOUS_SERVO_FIRST_CHANNEL) stopContinuousServo(i);
+    if (isContinuousServo(i)) stopContinuousServo(i);
     else writePulseForAngle(i, DEFAULT_ANGLE);
   }
 }
@@ -180,6 +233,10 @@ void handleCalibration(char* command) {
     return;
   }
   servoConfig[index] = {(uint16_t)minUs, (uint16_t)centerUs, (uint16_t)maxUs};
+  lastPulseUs[index] = PULSE_UNSET;
+  if (!isContinuousServo(index) || targets[index] != DEFAULT_ANGLE) {
+    writePulseForAngle(index, currentAngles[index]);
+  }
   Serial.print("ACKCAL,");
   Serial.print(channel);
   Serial.print(',');
@@ -281,7 +338,11 @@ void handleCommand(char* command) {
 
 void setup() {
   Serial.begin(115200);
+  recoverI2CBus();
   Wire.begin();
+#if defined(WIRE_HAS_TIMEOUT)
+  Wire.setWireTimeout(3000, true);
+#endif
   if (!pca.begin()) {
     Serial.println("ERR,PCA9685_NOT_FOUND");
     while (true) delay(1000);
@@ -295,7 +356,12 @@ void setup() {
 }
 
 void loop() {
+  const unsigned long now = millis();
+  if (bufferIndex > 0 && (now - lastSerialByteAt > SERIAL_LINE_TIMEOUT_MS)) {
+    bufferIndex = 0;
+  }
   while (Serial.available()) {
+    lastSerialByteAt = millis();
     const char ch = (char)Serial.read();
     if (ch == '\n') {
       commandBuffer[bufferIndex] = '\0';
