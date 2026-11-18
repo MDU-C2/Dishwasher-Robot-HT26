@@ -8,13 +8,15 @@ Desktop app for manual control and calibration of eight servos using an Arduino 
 - Connect Arduino, PCA9685, and servo supply grounds together.
 - Do not power servos from the Arduino 5 V output. Use a separate, suitable servo supply.
 - Connect the Arduino to the computer with a USB data cable.
+- Connect the 3 finger FSR sensors (Joy-It SEN-Pressure10) to analog pins `A0` (Finger 1), `A1` (Finger 2), and `A2` (Finger 3).
+- Connect the PAA5100JE optical flow sensor over SPI: `CS` → `D10`, `MOSI` → `D11`, `MISO` → `D12`, `SCK` → `D13`.
 
 Channels 0–4 control positional servos. Channels 5–7 control continuous-rotation servos: hold **Reverse** or **Forward** to rotate and release to stop. A 90° command disables the PCA9685 output on continuous channels.
 
 ## Upload the firmware
 
 1. Open `firmware/GripperController/GripperController.ino` in Arduino IDE.
-2. Install **Adafruit PWM Servo Driver Library** through Library Manager.
+2. Install **Adafruit PWM Servo Driver Library** and **Optical_Flow_Sensor** (`Optical_Flow_Sensors_Arduino`) through Library Manager / Arduino libraries.
 3. Select **Arduino UNO R4 WiFi**, choose the correct port, and upload.
 4. Close Serial Monitor before connecting the desktop app.
 

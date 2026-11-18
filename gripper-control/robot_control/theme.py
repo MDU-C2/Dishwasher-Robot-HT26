@@ -54,6 +54,69 @@ QFrame#MotionPanel, QFrame#SubPanel {
     border-radius: 0;
     padding: 4px;
 }
+QFrame#GripMasterPanel {
+    background: #16191E;
+    border: 2px solid #E5A93C;
+    border-left: 6px solid #E5A93C;
+    border-radius: 0;
+}
+
+QProgressBar {
+    background: #0D0E10;
+    border: 1px solid #4B5262;
+    border-radius: 0;
+    height: 10px;
+    text-align: center;
+    color: transparent;
+}
+QProgressBar::chunk { background: #E5A93C; }
+QProgressBar[fsrState="0"]::chunk, QProgressBar[optState="2"]::chunk { background: #4B5563; }
+QProgressBar[fsrState="1"]::chunk { background: #FACC15; }
+QProgressBar[fsrState="2"]::chunk, QProgressBar[optState="0"]::chunk { background: #22C55E; }
+QProgressBar[optState="1"]::chunk { background: #F97316; }
+QProgressBar[fsrState="3"]::chunk, QProgressBar[fsrState="4"]::chunk,
+QProgressBar[optState="3"]::chunk { background: #EF4444; }
+
+QLabel#FsrState0, QLabel#OptState2 {
+    color: #9CA3AF;
+    background: #16181C;
+    border: 1px solid #374151;
+    padding: 2px 6px;
+    font-size: 10px;
+    font-weight: 900;
+}
+QLabel#FsrState1 {
+    color: #FACC15;
+    background: #2A2008;
+    border: 1px solid #EAB308;
+    padding: 2px 6px;
+    font-size: 10px;
+    font-weight: 900;
+}
+QLabel#OptState1 {
+    color: #FDBA74;
+    background: #2D1606;
+    border: 1px solid #F97316;
+    padding: 2px 6px;
+    font-size: 10px;
+    font-weight: 900;
+}
+QLabel#FsrState2, QLabel#OptState0 {
+    color: #4ADE80;
+    background: #0D2818;
+    border: 1px solid #22C55E;
+    padding: 2px 6px;
+    font-size: 10px;
+    font-weight: 900;
+}
+QLabel#FsrState3, QLabel#FsrState4, QLabel#OptState3 {
+    color: #F87171;
+    background: #2D1215;
+    border: 1px solid #EF4444;
+    padding: 2px 6px;
+    font-size: 10px;
+    font-weight: 900;
+}
 
 QFrame#SectionBanner {
     background: #16181C;

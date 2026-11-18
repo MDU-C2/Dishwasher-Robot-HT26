@@ -1,12 +1,15 @@
-"""Reusable position- and continuous-servo control card."""
+"""Reusable position- and continuous-servo control card with optional FSR telemetry."""
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QPushButton, QSlider,
+    QFrame, QHBoxLayout, QLabel, QProgressBar, QPushButton, QSlider,
     QSpinBox, QVBoxLayout,
 )
 
-from .config import DEFAULT_ANGLE, MAX_ANGLE, MIN_ANGLE
+from .config import (
+    DEFAULT_ANGLE, DEFAULT_FSR_GRIP_THRESHOLD, FSR_PINS, FSR_STATE_LABELS,
+    MAX_ANGLE, MIN_ANGLE,
+)
 
 
 class ServoCard(QFrame):
@@ -58,6 +61,8 @@ class ServoCard(QFrame):
         top.addLayout(left)
         top.addStretch()
         self._command = DEFAULT_ANGLE
+        self._fsr_state = 0
+        self._fsr_limit = DEFAULT_FSR_GRIP_THRESHOLD
         self.value_text = QLabel("STOP" if continuous else f"{DEFAULT_ANGLE:03d}°")
         self.value_text.setObjectName("Angle")
         self.value_text.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
@@ -66,6 +71,10 @@ class ServoCard(QFrame):
 
         self.slider = None
         self.spinbox = None
+        self.fsr_bar = None
+        self.fsr_state_badge = None
+        self.fsr_value_label = None
+
         if continuous:
             outer.addSpacing(6)
             instruction = QLabel("HOLD DIRECTION TO DRIVE · RELEASE OR PRESS STOP")
@@ -96,6 +105,38 @@ class ServoCard(QFrame):
             self.forward_button.pressed.connect(lambda: self._continuous_pressed(MAX_ANGLE))
             self.reverse_button.released.connect(self._continuous_released)
             self.forward_button.released.connect(self._continuous_released)
+
+            fsr_panel = QFrame()
+            fsr_panel.setObjectName("SubPanel")
+            fsr_layout = QVBoxLayout(fsr_panel)
+            fsr_layout.setContentsMargins(10, 8, 10, 8)
+            fsr_layout.setSpacing(6)
+
+            fsr_header = QHBoxLayout()
+            fsr_header.setSpacing(8)
+            pin_name = FSR_PINS.get(channel, "ANALOG")
+            fsr_title = QLabel(f"FSR {pin_name} · FORCE TELEMETRY")
+            fsr_title.setObjectName("Kicker")
+            fsr_header.addWidget(fsr_title)
+            fsr_header.addStretch()
+            self.fsr_state_badge = QLabel(FSR_STATE_LABELS[0])
+            self.fsr_state_badge.setObjectName("FsrState0")
+            fsr_header.addWidget(self.fsr_state_badge)
+            fsr_layout.addLayout(fsr_header)
+
+            self.fsr_bar = QProgressBar()
+            self.fsr_bar.setRange(0, DEFAULT_FSR_GRIP_THRESHOLD)
+            self.fsr_bar.setValue(0)
+            self.fsr_bar.setTextVisible(False)
+            self.fsr_bar.setProperty("fsrState", "0")
+            fsr_layout.addWidget(self.fsr_bar)
+
+            self.fsr_value_label = QLabel(
+                f"Pressure: 0  (Raw: 0)  ·  Stop Limit: {DEFAULT_FSR_GRIP_THRESHOLD}"
+            )
+            self.fsr_value_label.setObjectName("Description")
+            fsr_layout.addWidget(self.fsr_value_label)
+            outer.addWidget(fsr_panel)
         else:
             outer.addSpacing(4)
             target_label = QLabel("COMMANDED TARGET ANGLE")
@@ -188,7 +229,16 @@ class ServoCard(QFrame):
 
     def set_ack(self, angle: int) -> None:
         if self.continuous:
-            label = "reverse" if angle == MIN_ANGLE else "forward" if angle == MAX_ANGLE else "stop"
+            if angle == MIN_ANGLE:
+                label = "reverse"
+            elif angle == MAX_ANGLE:
+                label = "forward"
+            elif angle == DEFAULT_ANGLE:
+                label = "stop"
+            elif angle < DEFAULT_ANGLE:
+                label = "reverse (slow)"
+            else:
+                label = "forward (slow)"
             self.feedback.setText(f"✓ Arduino confirmed: {label}")
         else:
             self.feedback.setText(f"✓ Arduino accepted target: {angle}°")
@@ -197,6 +247,34 @@ class ServoCard(QFrame):
     def set_offline(self) -> None:
         self.feedback.setText("Arduino not connected")
         self.feedback.setStyleSheet("color: #8B949E;")
+
+    def update_fsr(self, net: int, raw: int, state: int, grip_limit: int) -> None:
+        if not self.continuous or not self.fsr_bar or not self.fsr_state_badge or not self.fsr_value_label:
+            return
+        safe_limit = max(1, int(grip_limit))
+        self._fsr_limit = safe_limit
+        self.fsr_bar.setRange(0, safe_limit)
+        self.fsr_bar.setValue(max(0, min(int(net), safe_limit)))
+        self.fsr_value_label.setText(
+            f"Pressure: {net}  (Raw: {raw})  ·  Stop Limit: {safe_limit}"
+        )
+        clamped_state = state if state in FSR_STATE_LABELS else 0
+        if clamped_state != self._fsr_state:
+            self._fsr_state = clamped_state
+            self.fsr_state_badge.setObjectName(f"FsrState{clamped_state}")
+            self.fsr_state_badge.setText(FSR_STATE_LABELS[clamped_state])
+            self.fsr_state_badge.style().unpolish(self.fsr_state_badge)
+            self.fsr_state_badge.style().polish(self.fsr_state_badge)
+            self.fsr_bar.setProperty("fsrState", str(clamped_state))
+            self.fsr_bar.style().unpolish(self.fsr_bar)
+            self.fsr_bar.style().polish(self.fsr_bar)
+
+    def sync_continuous_state(self, value: int) -> None:
+        """Update continuous visual state from firmware telemetry without emitting serial commands."""
+        if self.continuous:
+            value = max(MIN_ANGLE, min(MAX_ANGLE, int(value)))
+            self._command = value
+            self._update_continuous_display(value)
 
     def _slider_changed(self, value: int) -> None:
         self._command = value
@@ -217,11 +295,16 @@ class ServoCard(QFrame):
             self.value_text.setText("REVERSE")
         elif value == MAX_ANGLE:
             self.value_text.setText("FORWARD")
-        else:
+        elif value == DEFAULT_ANGLE:
             self.value_text.setText("STOP")
+        elif value < DEFAULT_ANGLE:
+            self.value_text.setText("REV SLOW")
+        else:
+            self.value_text.setText("FWD SLOW")
 
     def reset_continuous_state(self) -> None:
         """Reset the visual hold-button state without sending serial data."""
         if self.continuous:
             self._command = DEFAULT_ANGLE
             self._update_continuous_display(DEFAULT_ANGLE)
+            self.update_fsr(0, 0, 0, self._fsr_limit)

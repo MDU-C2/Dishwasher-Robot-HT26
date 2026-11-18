@@ -8,19 +8,28 @@ import serial.tools.list_ports
 from PySide6.QtCore import QSettings, QTimer, Qt
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QMainWindow,
-    QPushButton, QScrollArea, QSpinBox, QTabWidget, QVBoxLayout, QWidget,
+    QProgressBar, QPushButton, QScrollArea, QSpinBox, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from .config import (
     APP_TITLE, CALIBRATION_STEP_US, COMMAND_INTERVAL_MS, CONTINUOUS_SERVO_CHANNELS,
     DEFAULT_ACCELERATION_DEG_S2, DEFAULT_ANGLE, DEFAULT_CALIBRATION_US,
-    DEFAULT_CONTINUOUS_CALIBRATION_US, DEFAULT_MAX_SPEED_DEG_S,
-    MAX_ACCELERATION_DEG_S2, MAX_MAX_SPEED_DEG_S, MAX_ANGLE,
-    MIN_ACCELERATION_DEG_S2, MIN_MAX_SPEED_DEG_S, MIN_ANGLE,
+    DEFAULT_CONTINUOUS_CALIBRATION_US, DEFAULT_FSR_CONTACT_THRESHOLD,
+    DEFAULT_FSR_GRIP_THRESHOLD, DEFAULT_FSR_MAX_THRESHOLD, DEFAULT_MAX_SPEED_DEG_S,
+    DEFAULT_OPTICAL_MOTION_THRESHOLD, DEFAULT_OPTICAL_SQUAL_THRESHOLD,
+    FSR_PINS, FSR_STATE_LABELS, MAX_ACCELERATION_DEG_S2, MAX_FSR_THRESHOLD,
+    MAX_MAX_SPEED_DEG_S, MAX_ANGLE, MAX_OPTICAL_MOTION_THRESHOLD,
+    MAX_OPTICAL_SQUAL_THRESHOLD, MIN_ACCELERATION_DEG_S2, MIN_FSR_THRESHOLD,
+    MIN_MAX_SPEED_DEG_S, MIN_ANGLE, MIN_OPTICAL_MOTION_THRESHOLD,
+    MIN_OPTICAL_SQUAL_THRESHOLD, OPTICAL_SPI_PINS, OPTICAL_STATE_LABELS,
     PULSE_MAX_ALLOWED_US, PULSE_MIN_ALLOWED_US, SERVO_CHANNELS,
 )
 from .calibration import ServoCalibration
-from .protocol import parse_line, set_angle, set_calibration, set_motion_profile
+from .protocol import (
+    grip_command, parse_line, set_angle, set_calibration, set_fsr_calibration,
+    set_fsr_guard, set_motion_profile, set_optical_calibration, set_optical_led,
+    tare_fsr, zero_optical,
+)
 from .serial_worker import SerialWorker
 from .servo_card import ServoCard
 
@@ -46,6 +55,13 @@ class MainWindow(QMainWindow):
         self.motion_notes: dict[int, QLabel] = {}
         self.cal_test_buttons: dict[int, tuple[QPushButton, QPushButton, QPushButton]] = {}
         self.cal_notes: dict[int, QLabel] = {}
+        self.fsr_contact_spins: dict[int, QSpinBox] = {}
+        self.fsr_grip_spins: dict[int, QSpinBox] = {}
+        self.fsr_max_spins: dict[int, QSpinBox] = {}
+        self.fsr_invert_boxes: dict[int, QCheckBox] = {}
+        self.fsr_cal_notes: dict[int, QLabel] = {}
+        self._grip_sync_active = False
+        self._opt_state = 3
 
         self._build_ui()
         self.refresh_ports()
@@ -180,6 +196,7 @@ class MainWindow(QMainWindow):
                 continuous=True,
             )
         )
+        control_layout.addWidget(self._build_grip_master_panel())
         cont_grid = QGridLayout()
         cont_grid.setHorizontalSpacing(14)
         cont_grid.setVerticalSpacing(14)
@@ -249,6 +266,17 @@ class MainWindow(QMainWindow):
         for index, channel in enumerate(continuous_channels):
             cont_cal_grid.addWidget(self._build_calibration_card(channel), index // 2, index % 2)
         calibration_layout.addLayout(cont_cal_grid)
+
+        calibration_layout.addSpacing(6)
+        calibration_layout.addWidget(
+            self._build_section_banner(
+                "OPTICAL SLIP SENSOR  ·  PAA5100JE CALIBRATION",
+                f"SPI {OPTICAL_SPI_PINS} · read-only movement detection thresholds",
+                continuous=True,
+                badge_text="SPI · READ-ONLY",
+            )
+        )
+        calibration_layout.addWidget(self._build_optical_calibration_card())
         calibration_layout.addStretch(1)
         self.tabs.addTab(calibration_page, "02  CALIBRATION")
 
@@ -257,7 +285,12 @@ class MainWindow(QMainWindow):
         content.addWidget(footer)
 
     @staticmethod
-    def _build_section_banner(title: str, subtitle: str, continuous: bool = False) -> QFrame:
+    def _build_section_banner(
+        title: str,
+        subtitle: str,
+        continuous: bool = False,
+        badge_text: str | None = None,
+    ) -> QFrame:
         banner = QFrame()
         banner.setObjectName("SectionBanner")
         banner.setProperty("continuous", continuous)
@@ -271,10 +304,247 @@ class MainWindow(QMainWindow):
         subtitle_label.setObjectName("Description")
         layout.addWidget(subtitle_label)
         layout.addStretch(1)
-        badge = QLabel("360° CONTINUOUS" if continuous else "180° POSITIONAL")
+        badge = QLabel(badge_text or ("360° CONTINUOUS" if continuous else "180° POSITIONAL"))
         badge.setObjectName("TypeBadgeCont" if continuous else "TypeBadgePos")
         layout.addWidget(badge)
         return banner
+
+    def _build_grip_master_panel(self) -> QFrame:
+        panel = QFrame()
+        panel.setObjectName("GripMasterPanel")
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(10)
+
+        top = QHBoxLayout()
+        top.setSpacing(10)
+        title = QLabel("MASTER 3-FINGER GRIP & FSR CONTROL")
+        title.setObjectName("Kicker")
+        top.addWidget(title)
+        top.addStretch(1)
+
+        self.fsr_guard_checkbox = QCheckBox("FSR Auto-Stop Guard")
+        self.fsr_guard_checkbox.setToolTip(
+            "Automatically stops each finger in closing direction when its FSR hits the grip limit"
+        )
+        self.fsr_guard_checkbox.setChecked(
+            self.settings.value("fsr/guard_enabled", True, type=bool)
+        )
+        self.fsr_guard_checkbox.toggled.connect(self._toggle_fsr_guard)
+        top.addWidget(self.fsr_guard_checkbox)
+
+        tare_btn = QPushButton("ZERO / TARE FSRs (UNLOADED)")
+        tare_btn.setObjectName("Quick")
+        tare_btn.setToolTip("Set current unloaded FSR readings as zero baseline on all 3 fingers")
+        tare_btn.clicked.connect(self._tare_fsrs)
+        top.addWidget(tare_btn)
+        layout.addLayout(top)
+
+        actions = QHBoxLayout()
+        actions.setSpacing(8)
+        auto_grip_btn = QPushButton("▶  AUTO-GRIP (CLOSE TO FSR LIMIT)")
+        auto_grip_btn.setObjectName("Primary")
+        auto_grip_btn.setToolTip(
+            "Closes all 3 fingers simultaneously, slows on contact, and stops each finger at its FSR limit"
+        )
+        auto_grip_btn.clicked.connect(self._trigger_auto_grip)
+        actions.addWidget(auto_grip_btn, 2)
+
+        hold_open_btn = QPushButton("⟲  HOLD OPEN ALL 3")
+        hold_open_btn.setObjectName("HoldReverse")
+        hold_open_btn.setToolTip("Hold to open all 3 fingers simultaneously; release to stop")
+        hold_open_btn.pressed.connect(lambda: self._grip_hold_action("OPEN_HOLD"))
+        hold_open_btn.released.connect(lambda: self._grip_hold_action("STOP"))
+        actions.addWidget(hold_open_btn, 2)
+
+        hold_close_btn = QPushButton("⟳  HOLD CLOSE ALL 3")
+        hold_close_btn.setObjectName("HoldForward")
+        hold_close_btn.setToolTip(
+            "Hold to close all 3 fingers simultaneously (FSR auto-stop stops each finger at its limit)"
+        )
+        hold_close_btn.pressed.connect(lambda: self._grip_hold_action("CLOSE_HOLD"))
+        hold_close_btn.released.connect(lambda: self._grip_hold_action("STOP"))
+        actions.addWidget(hold_close_btn, 2)
+
+        stop_btn = QPushButton("■  STOP FINGERS")
+        stop_btn.setObjectName("StopButton")
+        stop_btn.setToolTip("Immediately stop all 3 continuous finger servos")
+        stop_btn.clicked.connect(self._stop_all_fingers)
+        actions.addWidget(stop_btn, 1)
+        layout.addLayout(actions)
+
+        self.grip_master_status = QLabel(
+            "Connect Arduino to control all 3 fingers together with live FSR pressure limits."
+        )
+        self.grip_master_status.setObjectName("Description")
+        self.grip_master_status.setWordWrap(True)
+        layout.addWidget(self.grip_master_status)
+
+        opt_panel = QFrame()
+        opt_panel.setObjectName("SubPanel")
+        opt_layout = QVBoxLayout(opt_panel)
+        opt_layout.setContentsMargins(10, 8, 10, 8)
+        opt_layout.setSpacing(6)
+
+        opt_header = QHBoxLayout()
+        opt_header.setSpacing(8)
+        opt_title = QLabel("PAA5100JE OPTICAL FLOW · MOVEMENT MONITOR (READ-ONLY)")
+        opt_title.setObjectName("Kicker")
+        opt_header.addWidget(opt_title)
+        opt_header.addStretch(1)
+
+        self.opt_led_checkbox = QCheckBox("Sensor LED")
+        self.opt_led_checkbox.setToolTip(
+            "Toggle the white illumination LEDs on the PAA5100JE breakout"
+        )
+        self.opt_led_checkbox.setChecked(
+            self.settings.value("optical/led_enabled", True, type=bool)
+        )
+        self.opt_led_checkbox.toggled.connect(self._toggle_optical_led)
+        opt_header.addWidget(self.opt_led_checkbox)
+
+        zero_opt_btn = QPushButton("ZERO TOTAL X/Y")
+        zero_opt_btn.setObjectName("Quick")
+        zero_opt_btn.setToolTip("Reset accumulated Total X and Total Y movement counters to zero")
+        zero_opt_btn.clicked.connect(self._zero_optical)
+        opt_header.addWidget(zero_opt_btn)
+
+        self.opt_state_badge = QLabel(OPTICAL_STATE_LABELS[3])
+        self.opt_state_badge.setObjectName("OptState3")
+        opt_header.addWidget(self.opt_state_badge)
+        opt_layout.addLayout(opt_header)
+
+        saved_motion_thr = max(
+            MIN_OPTICAL_MOTION_THRESHOLD,
+            min(
+                MAX_OPTICAL_MOTION_THRESHOLD,
+                self.settings.value(
+                    "optical/motion_threshold_v2", DEFAULT_OPTICAL_MOTION_THRESHOLD, type=int
+                ),
+            ),
+        )
+        saved_squal_thr = max(
+            MIN_OPTICAL_SQUAL_THRESHOLD,
+            min(
+                MAX_OPTICAL_SQUAL_THRESHOLD,
+                self.settings.value(
+                    "optical/squal_threshold_v2", DEFAULT_OPTICAL_SQUAL_THRESHOLD, type=int
+                ),
+            ),
+        )
+
+        self.opt_mag_bar = QProgressBar()
+        self.opt_mag_bar.setRange(0, saved_motion_thr)
+        self.opt_mag_bar.setValue(0)
+        self.opt_mag_bar.setTextVisible(False)
+        self.opt_mag_bar.setProperty("optState", "3")
+        opt_layout.addWidget(self.opt_mag_bar)
+
+        self.opt_value_label = QLabel(
+            self._format_optical_readout(0, 0, 0, 0, 0, saved_motion_thr, saved_squal_thr)
+        )
+        self.opt_value_label.setObjectName("Description")
+        self.opt_value_label.setWordWrap(True)
+        opt_layout.addWidget(self.opt_value_label)
+        layout.addWidget(opt_panel)
+        return panel
+
+    def _build_optical_calibration_card(self) -> QFrame:
+        panel = QFrame()
+        panel.setObjectName("CalibrationCard")
+        panel.setProperty("continuous", True)
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(10)
+
+        header = QHBoxLayout()
+        header.setSpacing(8)
+        tag = QLabel("SPI")
+        tag.setObjectName("ChannelTag")
+        header.addWidget(tag)
+        name = QLabel("PAA5100JE OPTICAL FLOW SENSOR")
+        name.setObjectName("ServoName")
+        header.addWidget(name)
+        header.addStretch(1)
+        badge = QLabel("READ-ONLY MONITOR")
+        badge.setObjectName("TypeBadgeCont")
+        header.addWidget(badge)
+        layout.addLayout(header)
+
+        sub = QFrame()
+        sub.setObjectName("SubPanel")
+        sub_layout = QVBoxLayout(sub)
+        sub_layout.setContentsMargins(10, 8, 10, 8)
+        sub_layout.setSpacing(8)
+        kicker = QLabel("MOVEMENT ACTIVATION THRESHOLDS (NO MOTOR ACTION)")
+        kicker.setObjectName("Kicker")
+        sub_layout.addWidget(kicker)
+
+        fields = QHBoxLayout()
+        fields.setSpacing(10)
+
+        motion_col = QVBoxLayout()
+        motion_col.setSpacing(4)
+        motion_lbl = QLabel("MOVEMENT THRESHOLD (MAGNITUDE)")
+        motion_lbl.setObjectName("SmallCaps")
+        motion_col.addWidget(motion_lbl)
+        self.opt_motion_spin = QSpinBox()
+        self.opt_motion_spin.setRange(MIN_OPTICAL_MOTION_THRESHOLD, MAX_OPTICAL_MOTION_THRESHOLD)
+        self.opt_motion_spin.setSingleStep(1)
+        saved_motion = self.settings.value(
+            "optical/motion_threshold_v2", DEFAULT_OPTICAL_MOTION_THRESHOLD, type=int
+        )
+        self.opt_motion_spin.setValue(
+            max(MIN_OPTICAL_MOTION_THRESHOLD, min(MAX_OPTICAL_MOTION_THRESHOLD, saved_motion))
+        )
+        self.opt_motion_spin.setToolTip(
+            "Minimum optical motion magnitude sqrt(dX^2 + dY^2) required to flag MOVEMENT DETECTED"
+        )
+        motion_col.addWidget(self.opt_motion_spin)
+        fields.addLayout(motion_col)
+
+        squal_col = QVBoxLayout()
+        squal_col.setSpacing(4)
+        squal_lbl = QLabel("MIN SURFACE QUALITY (SQUAL)")
+        squal_lbl.setObjectName("SmallCaps")
+        squal_col.addWidget(squal_lbl)
+        self.opt_squal_spin = QSpinBox()
+        self.opt_squal_spin.setRange(MIN_OPTICAL_SQUAL_THRESHOLD, MAX_OPTICAL_SQUAL_THRESHOLD)
+        self.opt_squal_spin.setSingleStep(5)
+        saved_squal = self.settings.value(
+            "optical/squal_threshold_v2", DEFAULT_OPTICAL_SQUAL_THRESHOLD, type=int
+        )
+        self.opt_squal_spin.setValue(
+            max(MIN_OPTICAL_SQUAL_THRESHOLD, min(MAX_OPTICAL_SQUAL_THRESHOLD, saved_squal))
+        )
+        self.opt_squal_spin.setToolTip(
+            "Minimum SQUAL (0-255) required so empty-air noise does not trigger MOVEMENT DETECTED"
+        )
+        squal_col.addWidget(self.opt_squal_spin)
+        fields.addLayout(squal_col)
+        fields.addStretch(1)
+        sub_layout.addLayout(fields)
+        layout.addWidget(sub)
+
+        actions = QHBoxLayout()
+        actions.setSpacing(8)
+        reset_btn = QPushButton("RESET OPTICAL DEFAULTS")
+        reset_btn.setObjectName("Quick")
+        reset_btn.clicked.connect(self._reset_optical_defaults)
+        actions.addWidget(reset_btn)
+        apply_btn = QPushButton("SAVE / APPLY OPTICAL")
+        apply_btn.setObjectName("Primary")
+        apply_btn.clicked.connect(self._apply_optical_calibration)
+        actions.addWidget(apply_btn)
+        layout.addLayout(actions)
+
+        self.opt_cal_note = QLabel(
+            f"SPI pins: {OPTICAL_SPI_PINS}. Connect Arduino and move a surface 15–35 mm below the lens to tune."
+        )
+        self.opt_cal_note.setObjectName("Description")
+        self.opt_cal_note.setWordWrap(True)
+        layout.addWidget(self.opt_cal_note)
+        return panel
 
     def _build_calibration_card(self, channel: int) -> QFrame:
         continuous = channel in CONTINUOUS_SERVO_CHANNELS
@@ -475,7 +745,83 @@ class MainWindow(QMainWindow):
         note.setWordWrap(True)
         self.cal_notes[channel] = note
         layout.addWidget(note)
+
+        if continuous:
+            layout.addWidget(self._build_fsr_calibration_panel(channel))
+
         return panel
+
+    def _build_fsr_calibration_panel(self, channel: int) -> QFrame:
+        fsr_panel = QFrame()
+        fsr_panel.setObjectName("SubPanel")
+        fsr_layout = QVBoxLayout(fsr_panel)
+        fsr_layout.setContentsMargins(10, 8, 10, 8)
+        fsr_layout.setSpacing(8)
+
+        header = QHBoxLayout()
+        header.setSpacing(8)
+        pin_name = FSR_PINS.get(channel, "ANALOG")
+        title = QLabel(f"FSR SENSOR ({pin_name}) · GRIP LIMIT")
+        title.setObjectName("Kicker")
+        header.addWidget(title)
+        header.addStretch(1)
+
+        invert_box = QCheckBox("Invert Close (Reverse = Close)")
+        invert_box.setToolTip(
+            "Check this if Reverse (0°) rather than Forward (180°) tightens this finger's tendon."
+        )
+        invert_box.setChecked(
+            self.settings.value(f"fsr/{channel}/invert_close", False, type=bool)
+        )
+        header.addWidget(invert_box)
+        fsr_layout.addLayout(header)
+
+        fields = QHBoxLayout()
+        fields.setSpacing(8)
+        specs = (
+            ("CONTACT THR", "contact", DEFAULT_FSR_CONTACT_THRESHOLD),
+            ("GRIP STOP THR", "grip", DEFAULT_FSR_GRIP_THRESHOLD),
+            ("MAX SAFETY THR", "max", DEFAULT_FSR_MAX_THRESHOLD),
+        )
+        boxes: list[QSpinBox] = []
+        for label_text, key, default_val in specs:
+            col = QVBoxLayout()
+            col.setSpacing(4)
+            lbl = QLabel(label_text)
+            lbl.setObjectName("SmallCaps")
+            col.addWidget(lbl)
+            spin = QSpinBox()
+            spin.setRange(MIN_FSR_THRESHOLD, MAX_FSR_THRESHOLD)
+            spin.setSingleStep(25)
+            saved_val = self.settings.value(f"fsr/{channel}/{key}", default_val, type=int)
+            spin.setValue(max(MIN_FSR_THRESHOLD, min(MAX_FSR_THRESHOLD, saved_val)))
+            col.addWidget(spin)
+            fields.addLayout(col)
+            boxes.append(spin)
+        fsr_layout.addLayout(fields)
+
+        self.fsr_contact_spins[channel] = boxes[0]
+        self.fsr_grip_spins[channel] = boxes[1]
+        self.fsr_max_spins[channel] = boxes[2]
+        self.fsr_invert_boxes[channel] = invert_box
+
+        apply_btn = QPushButton("APPLY FSR SETTINGS")
+        apply_btn.setObjectName("Quick")
+        apply_btn.clicked.connect(
+            lambda checked=False, ch=channel: self._apply_fsr_calibration(ch)
+        )
+        fsr_layout.addWidget(apply_btn)
+
+        fsr_note = QLabel(f"Live {pin_name}: waiting for Arduino connection …")
+        fsr_note.setObjectName("Description")
+        fsr_note.setWordWrap(True)
+        self.fsr_cal_notes[channel] = fsr_note
+        fsr_layout.addWidget(fsr_note)
+
+        if channel in self.cards:
+            self.cards[channel].update_fsr(0, 0, 0, boxes[1].value())
+
+        return fsr_panel
 
     def _reset_calibration_defaults(self, channel: int) -> None:
         defaults = (
@@ -574,6 +920,19 @@ class MainWindow(QMainWindow):
             )
             self.cards[channel].set_angle(target_angle)
             self.pending[channel] = target_angle
+        self.worker.send(set_fsr_guard(self.fsr_guard_checkbox.isChecked()))
+        for finger_index, channel in enumerate(CONTINUOUS_SERVO_CHANNELS):
+            contact, grip, max_thr, invert = self._fsr_values(channel)
+            self.worker.send(
+                set_fsr_calibration(finger_index, contact, grip, max_thr, invert)
+            )
+            self.cards[channel].update_fsr(0, 0, 0, grip)
+        self.worker.send(
+            set_optical_calibration(
+                self.opt_motion_spin.value(), self.opt_squal_spin.value()
+            )
+        )
+        self.worker.send(set_optical_led(self.opt_led_checkbox.isChecked()))
         self._flush_pending()
 
     def _apply_motion_profile(self, channel: int) -> None:
@@ -668,6 +1027,189 @@ class MainWindow(QMainWindow):
         boxes = self.cal_inputs[channel]
         return boxes[0].value(), boxes[1].value(), boxes[2].value()
 
+    def _fsr_values(self, channel: int) -> tuple[int, int, int, bool]:
+        return (
+            self.fsr_contact_spins[channel].value(),
+            self.fsr_grip_spins[channel].value(),
+            self.fsr_max_spins[channel].value(),
+            self.fsr_invert_boxes[channel].isChecked(),
+        )
+
+    def _apply_fsr_calibration(self, channel: int) -> None:
+        contact, grip, max_thr, invert = self._fsr_values(channel)
+        if not (MIN_FSR_THRESHOLD <= contact < grip < max_thr <= MAX_FSR_THRESHOLD):
+            self.fsr_cal_notes[channel].setText(
+                f"ERROR: Must satisfy {MIN_FSR_THRESHOLD} <= CONTACT < GRIP STOP < MAX <= {MAX_FSR_THRESHOLD}."
+            )
+            return
+        self.settings.setValue(f"fsr/{channel}/contact", contact)
+        self.settings.setValue(f"fsr/{channel}/grip", grip)
+        self.settings.setValue(f"fsr/{channel}/max", max_thr)
+        self.settings.setValue(f"fsr/{channel}/invert_close", invert)
+        self.settings.sync()
+        if self.settings.status() != QSettings.Status.NoError:
+            self.fsr_cal_notes[channel].setText("COULD NOT SAVE FSR SETTINGS.")
+            return
+        if channel in self.cards:
+            self.cards[channel].update_fsr(0, 0, 0, grip)
+        finger_index = CONTINUOUS_SERVO_CHANNELS.index(channel)
+        if self.arduino_ready and self.worker:
+            self.worker.send(set_fsr_calibration(finger_index, contact, grip, max_thr, invert))
+            self.fsr_cal_notes[channel].setText(
+                f"ACTIVE: Contact {contact} / Stop {grip} / Max {max_thr}"
+                + (" (Inverted close)" if invert else "")
+            )
+        else:
+            self.fsr_cal_notes[channel].setText(
+                f"SAVED: Contact {contact} / Stop {grip} / Max {max_thr}. Sent on next connect."
+            )
+
+    def _trigger_auto_grip(self) -> None:
+        if not self.arduino_ready or not self.worker:
+            self.grip_master_status.setText("CONNECT THE ARDUINO BEFORE STARTING AUTO-GRIP.")
+            return
+        self._grip_sync_active = True
+        for ch in CONTINUOUS_SERVO_CHANNELS:
+            self.pending.pop(ch, None)
+        self.worker.send(grip_command("START"))
+        self.grip_master_status.setText(
+            "AUTO-GRIP ACTIVE: Closing all 3 fingers until each FSR reaches its stop limit …"
+        )
+
+    def _grip_hold_action(self, action: str) -> None:
+        if not self.arduino_ready or not self.worker:
+            if action != "STOP":
+                self.grip_master_status.setText("CONNECT THE ARDUINO BEFORE DRIVING FINGERS.")
+            return
+        self._grip_sync_active = action != "STOP"
+        for ch in CONTINUOUS_SERVO_CHANNELS:
+            self.pending.pop(ch, None)
+            if action == "STOP":
+                self.cards[ch].sync_continuous_state(DEFAULT_ANGLE)
+        self.worker.send(grip_command(action))
+        if action == "CLOSE_HOLD":
+            self.grip_master_status.setText(
+                "HOLDING CLOSE ALL 3 FINGERS (FSR auto-stop guard active)."
+            )
+        elif action == "OPEN_HOLD":
+            self.grip_master_status.setText("HOLDING OPEN ALL 3 FINGERS.")
+        else:
+            self.grip_master_status.setText("ALL 3 FINGERS STOPPED.")
+
+    def _stop_all_fingers(self) -> None:
+        self._grip_sync_active = False
+        for ch in CONTINUOUS_SERVO_CHANNELS:
+            self.pending.pop(ch, None)
+            self.cards[ch].sync_continuous_state(DEFAULT_ANGLE)
+        if self.arduino_ready and self.worker:
+            self.worker.send(grip_command("STOP"))
+        self.grip_master_status.setText("ALL 3 FINGERS STOPPED.")
+
+    def _toggle_fsr_guard(self, enabled: bool) -> None:
+        self.settings.setValue("fsr/guard_enabled", enabled)
+        self.settings.sync()
+        if self.arduino_ready and self.worker:
+            self.worker.send(set_fsr_guard(enabled))
+        self.grip_master_status.setText(
+            "FSR Auto-Stop Guard ENABLED: fingers stop automatically at their grip limit."
+            if enabled
+            else "WARNING: FSR Auto-Stop Guard DISABLED (manual pressure monitoring only)."
+        )
+
+    def _tare_fsrs(self) -> None:
+        if not self.arduino_ready or not self.worker:
+            self.grip_master_status.setText("CONNECT THE ARDUINO TO ZERO / TARE FSR SENSORS.")
+            return
+        self.worker.send(tare_fsr())
+        self.grip_master_status.setText("ZERO / TARE SENT (KEEP ALL FINGERS UNLOADED) …")
+
+    def _reset_optical_defaults(self) -> None:
+        self.opt_motion_spin.setValue(DEFAULT_OPTICAL_MOTION_THRESHOLD)
+        self.opt_squal_spin.setValue(DEFAULT_OPTICAL_SQUAL_THRESHOLD)
+        self.opt_cal_note.setText(
+            f"DEFAULTS LOADED (Mag ≥ {DEFAULT_OPTICAL_MOTION_THRESHOLD}, SQUAL ≥ {DEFAULT_OPTICAL_SQUAL_THRESHOLD}). "
+            "CLICK SAVE / APPLY OPTICAL TO PERSIST."
+        )
+
+    def _apply_optical_calibration(self) -> None:
+        motion_thr = self.opt_motion_spin.value()
+        squal_thr = self.opt_squal_spin.value()
+        self.settings.setValue("optical/motion_threshold_v2", motion_thr)
+        self.settings.setValue("optical/squal_threshold_v2", squal_thr)
+        self.settings.sync()
+        if self.settings.status() != QSettings.Status.NoError:
+            self.opt_cal_note.setText("COULD NOT SAVE OPTICAL SETTINGS.")
+            return
+        self.opt_mag_bar.setRange(0, max(1, motion_thr))
+        if self.arduino_ready and self.worker:
+            self.worker.send(set_optical_calibration(motion_thr, squal_thr))
+            self.opt_cal_note.setText(
+                f"ACTIVE: Trigger when Mag ≥ {motion_thr}"
+                + (f" & SQUAL ≥ {squal_thr}." if squal_thr > 0 else ".")
+            )
+        else:
+            self.opt_cal_note.setText(
+                f"SAVED: Mag ≥ {motion_thr}"
+                + (f" & SQUAL ≥ {squal_thr}." if squal_thr > 0 else ".")
+                + " Sent on next connect."
+            )
+
+    def _toggle_optical_led(self, enabled: bool) -> None:
+        self.settings.setValue("optical/led_enabled", enabled)
+        self.settings.sync()
+        if self.arduino_ready and self.worker:
+            self.worker.send(set_optical_led(enabled))
+
+    def _zero_optical(self) -> None:
+        if not self.arduino_ready or not self.worker:
+            self.opt_cal_note.setText("CONNECT THE ARDUINO TO ZERO TOTAL X / Y.")
+            return
+        self.worker.send(zero_optical())
+
+    @staticmethod
+    def _format_optical_readout(
+        dx: int,
+        dy: int,
+        mag: int,
+        total_x: int,
+        total_y: int,
+        motion_thr: int,
+        squal_thr: int,
+    ) -> str:
+        trigger = f"Mag ≥ {motion_thr}" + (f" & SQUAL ≥ {squal_thr}" if squal_thr > 0 else "")
+        return (
+            f"X: {dx}  |  Y: {dy}  |  Mag: {mag}  |  Total X: {total_x}  |  Total Y: {total_y}  ·  "
+            f"Trigger: {trigger}"
+        )
+
+    def _update_optical_display(
+        self, dx: int, dy: int, mag: int, total_x: int, total_y: int, state: int
+    ) -> None:
+        motion_thr = max(1, self.opt_motion_spin.value())
+        squal_thr = self.opt_squal_spin.value()
+        clamped_state = state if state in OPTICAL_STATE_LABELS else 3
+        self.opt_mag_bar.setRange(0, motion_thr)
+        self.opt_mag_bar.setValue(max(0, min(mag, motion_thr)))
+        if clamped_state != self._opt_state:
+            self._opt_state = clamped_state
+            self.opt_state_badge.setObjectName(f"OptState{clamped_state}")
+            self.opt_state_badge.setText(OPTICAL_STATE_LABELS[clamped_state])
+            self._repolish(self.opt_state_badge)
+            self.opt_mag_bar.setProperty("optState", str(clamped_state))
+            self._repolish(self.opt_mag_bar)
+        self.opt_value_label.setText(
+            self._format_optical_readout(dx, dy, mag, total_x, total_y, motion_thr, squal_thr)
+        )
+        if clamped_state == 3:
+            self.opt_cal_note.setText(
+                f"SENSOR OFFLINE: Check PAA5100JE SPI wiring ({OPTICAL_SPI_PINS}) and power."
+            )
+        else:
+            self.opt_cal_note.setText(
+                f"Live PAA5100JE: {OPTICAL_STATE_LABELS[clamped_state]}  ·  "
+                f"X: {dx}  |  Y: {dy}  |  Mag: {mag}  |  Total X: {total_x}  |  Total Y: {total_y}"
+            )
+
     def _test_calibration_point(self, channel: int, angle: int) -> None:
         if not self.arduino_ready or not self.worker:
             self.cal_notes[channel].setText("CONNECT THE ARDUINO BEFORE TESTING.")
@@ -717,6 +1259,107 @@ class MainWindow(QMainWindow):
                 return
             if channel in self.cards:
                 self.cards[channel].set_ack(angle)
+                if channel in CONTINUOUS_SERVO_CHANNELS and (
+                    self._grip_sync_active or angle == DEFAULT_ANGLE
+                ):
+                    self.cards[channel].sync_continuous_state(angle)
+        elif kind == "FSR" and len(values) == 9:
+            try:
+                parsed = [int(v) for v in values]
+            except ValueError:
+                return
+            nets, raws, states = parsed[:3], parsed[3:6], parsed[6:9]
+            for finger_index, ch in enumerate(CONTINUOUS_SERVO_CHANNELS):
+                grip_limit = self.fsr_grip_spins[ch].value() if ch in self.fsr_grip_spins else DEFAULT_FSR_GRIP_THRESHOLD
+                if ch in self.cards:
+                    self.cards[ch].update_fsr(
+                        nets[finger_index], raws[finger_index], states[finger_index], grip_limit
+                    )
+                if ch in self.fsr_cal_notes:
+                    pin = FSR_PINS.get(ch, "FSR")
+                    label = FSR_STATE_LABELS.get(states[finger_index], "UNKNOWN")
+                    self.fsr_cal_notes[ch].setText(
+                        f"Live {pin}: Net {nets[finger_index]} · Raw {raws[finger_index]} · {label}"
+                    )
+        elif kind == "ACKFSRCAL" and len(values) == 5:
+            try:
+                finger, contact, grip, max_thr, invert = map(int, values)
+            except ValueError:
+                return
+            if 0 <= finger < len(CONTINUOUS_SERVO_CHANNELS):
+                ch = CONTINUOUS_SERVO_CHANNELS[finger]
+                if ch in self.fsr_cal_notes:
+                    self.fsr_cal_notes[ch].setText(
+                        f"ARDUINO CONFIRMED FSR: Contact {contact} / Stop {grip} / Max {max_thr}"
+                        + (" (Inverted close)" if invert else "")
+                    )
+        elif kind == "ACKFSRGUARD" and len(values) == 1:
+            enabled = values[0] == "1"
+            self.grip_master_status.setText(
+                "ARDUINO CONFIRMED: FSR Auto-Stop Guard ENABLED."
+                if enabled
+                else "ARDUINO CONFIRMED: FSR Auto-Stop Guard DISABLED."
+            )
+        elif kind == "ACKFSRTARE" and len(values) == 3:
+            self.grip_master_status.setText(
+                f"FSRs ZEROED (unloaded baselines: {values[0]} / {values[1]} / {values[2]})."
+            )
+        elif kind == "GRIPSTATE" and len(values) == 1:
+            state = values[0]
+            if state == "DONE":
+                self._grip_sync_active = False
+                self.grip_master_status.setText(
+                    "AUTO-GRIP COMPLETE: All 3 fingers stopped at their FSR grip limits."
+                )
+            elif state == "TIMEOUT":
+                self._grip_sync_active = False
+                self.grip_master_status.setText(
+                    "AUTO-GRIP TIMEOUT (6s): Stopped fingers that did not reach target pressure."
+                )
+            elif state == "STOPPED":
+                self._grip_sync_active = False
+                self.grip_master_status.setText("ALL 3 FINGERS STOPPED.")
+            elif state == "CLOSING":
+                self.grip_master_status.setText(
+                    "AUTO-GRIP CLOSING: Slowing on contact, stopping at FSR grip limits …"
+                )
+            elif state == "CLOSE_HOLD":
+                self.grip_master_status.setText("CLOSING ALL 3 FINGERS (FSR guard active) …")
+            elif state == "OPEN_HOLD":
+                self.grip_master_status.setText("OPENING ALL 3 FINGERS …")
+        elif kind == "GRIPSTOP" and len(values) == 2:
+            try:
+                finger, net = map(int, values)
+            except ValueError:
+                return
+            if 0 <= finger < len(CONTINUOUS_SERVO_CHANNELS):
+                ch = CONTINUOUS_SERVO_CHANNELS[finger]
+                if ch in self.cards:
+                    self.cards[ch].sync_continuous_state(DEFAULT_ANGLE)
+                self.grip_master_status.setText(
+                    f"{SERVO_CHANNELS[ch]} stopped at FSR limit (pressure: {net})."
+                )
+        elif kind == "OPT" and len(values) == 6:
+            try:
+                dx, dy, mag, total_x, total_y, state = map(int, values)
+            except ValueError:
+                return
+            self._update_optical_display(dx, dy, mag, total_x, total_y, state)
+        elif kind == "ACKOPTZERO":
+            self.opt_cal_note.setText("ARDUINO CONFIRMED: Total X / Y reset to 0.")
+        elif kind == "ACKOPTCAL" and len(values) == 2:
+            try:
+                motion_thr, squal_thr = map(int, values)
+            except ValueError:
+                return
+            self.opt_cal_note.setText(
+                f"ARDUINO CONFIRMED OPTICAL: Mag ≥ {motion_thr} & SQUAL ≥ {squal_thr}."
+            )
+        elif kind == "ACKOPTLED" and len(values) == 1:
+            led_on = values[0] == "1"
+            self.opt_cal_note.setText(
+                f"ARDUINO CONFIRMED: Optical sensor LED {'ON' if led_on else 'OFF'}."
+            )
         elif kind == "ACKCAL" and len(values) == 4:
             try:
                 channel, low, center, high = map(int, values)
@@ -756,10 +1399,20 @@ class MainWindow(QMainWindow):
 
     def _worker_finished(self) -> None:
         self.arduino_ready = False
+        self._grip_sync_active = False
         self.pending.clear()
         for card in self.cards.values():
             card.reset_continuous_state()
             card.set_offline()
+        for ch, note in self.fsr_cal_notes.items():
+            note.setText(f"Live {FSR_PINS.get(ch, 'FSR')}: waiting for Arduino connection …")
+        self._update_optical_display(0, 0, 0, 0, 0, 3)
+        self.opt_cal_note.setText(
+            f"SPI pins: {OPTICAL_SPI_PINS}. Connect Arduino and move a surface 15–35 mm below the lens to tune."
+        )
+        self.grip_master_status.setText(
+            "Connect Arduino to control all 3 fingers together with live FSR pressure limits."
+        )
         self._set_status("Bad" if self._last_error else "Off",
                          "■ ERROR" if self._last_error else "■ OFFLINE")
         if not self._last_error:
@@ -775,11 +1428,13 @@ class MainWindow(QMainWindow):
         self.refresh_ports()
 
     def _center_all(self) -> None:
+        self._grip_sync_active = False
         for card in self.cards.values():
             card.set_angle(DEFAULT_ANGLE)
         if self.arduino_ready and self.worker:
             self.pending.clear()
             self.worker.send("CENTER\n")
+            self.grip_master_status.setText("CENTER ALL SENT: All 3 fingers stopped.")
 
     @staticmethod
     def _servo_command_label(channel: int, angle: int) -> str:
