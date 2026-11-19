@@ -81,6 +81,15 @@ def setup():
         if not tc.calibrate() and not saved:
             return False
     tc.report()
+
+    # ArUco tracking check
+    tracker = tc.get_tracker()
+    if tracker.ref_corners is None:
+        print("\n[ARUCO] No reference ArUco pose found for tray tracking.")
+        if input("Do you want to calibrate the ArUco tray reference now? (y/n): ").strip().lower() == "y":
+            from calibrate_aruco import calibrate_aruco_reference
+            calibrate_aruco_reference()
+
     if not tc.start():
         print("[TRAY] Cannot read tray camera or YOLO model.")
         return False

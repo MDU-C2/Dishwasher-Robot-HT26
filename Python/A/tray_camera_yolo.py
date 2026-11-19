@@ -9,7 +9,7 @@ import cv2 as cv
 import numpy as np
 CAM = int(os.environ.get("TRAY_CAM", 1))
 YOLO_CONF = 0.35                                             
-OVERLAP_THRESH = 0.30                                                                      
+OVERLAP_THRESH = 0.15                                                                      
 PIX = 40                                           
 FRAC = 0.15                                       
 BLUR = (7, 7)
@@ -47,7 +47,27 @@ def load_robot_coords():
         except Exception as e:
             print(f"[TRAY WARNING] Error reading {POS_CFG}: {e}")
     return coords
-COORDS = load_robot_coords()
+from aruco_tray_tracker import TrayArucoTracker
+_tracker = TrayArucoTracker()
+_ref_robot_coords = None
+_ref_boxes = None
+
+def get_tracker():
+    return _tracker
+
+def get_ref_robot_coords():
+    global _ref_robot_coords
+    if _ref_robot_coords is None:
+        _ref_robot_coords = load_robot_coords()
+    return _ref_robot_coords
+
+def dynamic_robot_coords():
+    ref = get_ref_robot_coords()
+    return _tracker.transform_robot_coords(ref)
+
+def dynamic_boxes():
+    ref = boxes()
+    return _tracker.transform_slot_boxes(ref)
 _yolo_model = None
 _yolo_failed = False
 def get_yolo_model():
@@ -233,8 +253,9 @@ def _box_overlap_check(slot_box, cup_box):
     ratio = inter_area / float(cup_area)
     return (ratio >= OVERLAP_THRESH), ratio
 def _nxt():
-    coords = load_robot_coords()
-    for n in boxes():
+    coords = dynamic_robot_coords()
+    curr_boxes = dynamic_boxes()
+    for n in curr_boxes:
         if _st.get(n) == "free" and n in coords:
             return n
     return None
@@ -245,15 +266,16 @@ def _draw():
     if f is None:
         return
     v = f.copy()
-    coords = load_robot_coords()
+    coords = dynamic_robot_coords()
     nx = _nxt()
+    curr_boxes = dynamic_boxes()
     with _lock:
         cups_to_draw = list(_detected_cups)
     for (cx1, cy1, cx2, cy2, conf, label) in cups_to_draw:
         cv.rectangle(v, (cx1, cy1), (cx2, cy2), (255, 120, 0), 2)
         cv.putText(v, f"cup {conf:.0%}", (cx1, max(cy1 - 5, 12)),
                    cv.FONT_HERSHEY_SIMPLEX, 0.5, (255, 120, 0), 1)
-    for n, (x1, y1, x2, y2) in boxes().items():
+    for n, (x1, y1, x2, y2) in curr_boxes.items():
         s = _st.get(n, "free")
         if s == "sent":
             txt, col = "sent",      (0, 255, 255)
@@ -270,6 +292,7 @@ def _draw():
         cv.rectangle(v, (x1, y1), (x2, y2), col, 2)
         cv.putText(v, f"{n}: {txt}", (x1, max(y1 - 10, 12)),
                    cv.FONT_HERSHEY_SIMPLEX, 0.55, col, 2)
+    _tracker.draw(v)
     status_text = f"[TRAY YOLO] Model: best.pt | Cups: {len(cups_to_draw)} | Next: {nx or 'None'}"
     cv.putText(v, status_text, (10, 25), cv.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2)
     _view = v
@@ -283,10 +306,16 @@ def _scan(n=1, wait=0.05, quiet=False):
     if f is None:
         return False
     fh, fw = f.shape[:2]
+
+    # Track ArUco marker attached to tray
+    _tracker.detect(f)
+
     model = get_yolo_model()
     results = {}
     detected_cups = []
     out = []
+    curr_boxes = dynamic_boxes()
+
     if model is not None:
         try:
             pred = model.predict(f, conf=YOLO_CONF, verbose=False)[0]
@@ -298,7 +327,7 @@ def _scan(n=1, wait=0.05, quiet=False):
                     cls_id = int(b.cls[0].cpu().numpy())
                     label = model.names.get(cls_id, "cup")
                     detected_cups.append((int(xyxy[0]), int(xyxy[1]), int(xyxy[2]), int(xyxy[3]), conf, label))
-            for k, (x1, y1, x2, y2) in boxes().items():
+            for k, (x1, y1, x2, y2) in curr_boxes.items():
                 if not (0 <= x1 < x2 <= fw and 0 <= y1 < y2 <= fh):
                     results[k] = "unknown"
                     out.append(f"{k} unknown")
@@ -367,9 +396,10 @@ def take():
     if not _scan(n=SCAN_FRAMES, wait=0.05):
         print("[TRAY] Scan failed — cannot confirm slot occupancy.")
         return None
-    coords = load_robot_coords()
+    coords = dynamic_robot_coords()
+    curr_boxes = dynamic_boxes()
     with _lock:
-        for n in boxes():
+        for n in curr_boxes:
             if _st.get(n) not in (None, "free"):
                 continue
             if _cam.get(n) == "occupied":
@@ -387,36 +417,34 @@ def _scanner_loop():
     while _go:
         with _lock:
             pending = dict(_pending_check)
-        if pending:
-            if _scan(n=1, wait=0.05, quiet=True):
-                now = time.time()
-                missed_slots = []
-                with _lock:
-                    for n, deadline in list(_pending_check.items()):
-                        cam_state = _cam.get(n)
-                        if cam_state == "occupied":
-                            _st[n] = "full"
-                            del _pending_check[n]
-                            _draw()
-                            print(f"[TRAY] ✓ Cup confirmed by YOLO in '{n}'.")
-                        elif now > deadline:
-                            _st[n] = "free"
-                            del _pending_check[n]
-                            missed_slots.append(n)
-                            print(
-                                f"[TRAY] ✗ Cup not seen in '{n}' — "
-                                f"slot freed for reuse. Rescanning all slots..."
-                            )
-                if missed_slots:
-                    time.sleep(SCAN_DELAY)
-                    if _scan(n=SCAN_FRAMES, wait=0.2, quiet=False):
-                        with _lock:
-                            for slot in boxes():
-                                if _st.get(slot) == "sent":
-                                    continue
-                                new_state = "free" if _cam.get(slot) == "free" else "full"
-                                _st[slot] = new_state
-                            _draw()
+
+        if _scan(n=1, wait=0.05, quiet=True):
+            now = time.time()
+            with _lock:
+                # 1. Real-time slot state sync: update any slot that is not currently 'sent' (in motion)
+                for slot in dynamic_boxes():
+                    if _st.get(slot) == "sent":
+                        continue
+                    cam_state = _cam.get(slot, "free")
+                    if cam_state == "occupied":
+                        _st[slot] = "full"
+                    else:
+                        # Automatically frees up the slot when a cup is removed!
+                        _st[slot] = "free"
+
+                # 2. Handle pending placement verifications
+                for n, deadline in list(_pending_check.items()):
+                    if _cam.get(n) == "occupied":
+                        _st[n] = "full"
+                        del _pending_check[n]
+                        print(f"[TRAY] ✓ Cup confirmed by YOLO in '{n}'.")
+                    elif now > deadline:
+                        _st[n] = "free"
+                        del _pending_check[n]
+                        print(f"[TRAY] ✗ Cup not seen in '{n}' — slot freed for reuse.")
+
+                _draw()
+
         time.sleep(GAP)
 def done(n):
     deadline = time.time() + DELAY + TRIES * GAP
@@ -441,6 +469,7 @@ def verify(n):
             return True
         return False
 def view():
+    _scan(n=1, wait=0.01, quiet=True)
     _draw()
     return _view
 def close():

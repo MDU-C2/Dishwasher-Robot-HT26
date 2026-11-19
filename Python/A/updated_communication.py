@@ -34,11 +34,11 @@ class Communication():
         self.ROBOTWANTSTOSENDORIENTATION = ["Robot_Wants_To_Send_Orientation", ] # RAPID gives the robots coordinates
 
         self.ASKMUGCOORDINATES = ["Ask_MugCoordinate", "Ask_Coordinate"] # Python gives a mugs coordinates
-        self.ASKMUGORIENTATION = ["Ask_MugOrientation", "Ask_Orientation"]
+        self.ASKMUGORIENTATION = ["Ask_MugOrientation", "Ask_Orientation", "Ack_CoordinateAsk_Orientation", "Ack_CoordinateAsk_MugOrientation"]
         self.ASKNEXT = ["AskNext",  "Ack_Grip_Done", "Ack_Release done", "Ask_next"] # RAPID is ready for the next command
 
         self.ASKCALPOINT = ["AskCalPoint", ]
-        self.ASKMUGNORMAL = ["Ask_MugNormal", ]
+        self.ASKMUGNORMAL = ["Ask_MugNormal", "Ack_CoordinateAsk_MugNormal"]
         self.ASKFREESLOT = ["Ask_LeavePosition", "Ask_FreeSlot"]
 
         self.NEXTSTEP = ["Next_step",]
