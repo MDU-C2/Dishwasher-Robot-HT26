@@ -45,6 +45,16 @@ The **Automatic grip on entry** option starts the existing `GRIP,START` routine 
 
 Default LiDAR trigger threshold: 150 mm. Adjustable range: 30–1300 mm. The re-arm margin is currently fixed at 50 mm.
 
+## Slip detection and adaptive grip (stage 2)
+
+The PAA5100JE optical-flow sensor is mounted under the rubber-covered skin on finger 1, so its movement signal is tactile evidence from that fingertip rather than a view of the external scene. The palm-mounted VL53L4CD measures palm-to-object range change. Optical skin motion can independently confirm slip; LiDAR evidence can independently confirm range movement; both together are reported as corroborated movement. Telemetry is `SLIP,<confidence>,<state>,<optical_active>,<lidar_active>` at 10 Hz. State values are 0 = unavailable, 1 = stable, 2 = suspected, 3 = corroborated, 4 = optical confirmed, and 5 = LiDAR confirmed.
+
+The calibration tab exposes the LiDAR slip speed threshold (5–200 mm/s, default 20 mm/s). The speed deadband is 3 mm/s. The desktop sends `SLIPCFG,<speed_threshold_mm_s>` on apply and reconnect; firmware replies `ACKSLIPCFG,<speed_threshold_mm_s>`. This is separate from `LIDARCFG`, whose distance threshold controls automatic grasp-on-entry.
+
+Adaptive grip is **off by default**. Enable **Adaptive grip · tighten gradually on confirmed slip** in the grip master panel, then start **AUTO-GRIP**. The existing FSR-controlled initial close runs first. Only after all fingers reach their calibrated grip targets does adaptive monitoring become active. On a new confirmed slip event, optical-only evidence raises finger 1's target; LiDAR evidence raises targets for all fingers. Each eligible target increases by 40 FSR ADC counts per event, with a 1.2 second minimum interval, and is capped at that finger's configured FSR maximum. A finger with an FSR sensor fault, or without detected contact, is not tightened. The desktop sends `ADAPTIVE,1` to enable the feature and `ADAPTIVE,0` to disable it; the firmware confirms with `ACKADAPTIVE`. The controller requires the FSR Auto-Stop Guard; disabling the guard cancels adaptive operation. Manual finger commands, FSR tare, recalibration, STOP, OPEN, and host timeout also cancel the active adaptive session.
+
+FSR counts are sensor readings, not calibrated force units. Set each finger's contact, grip, and maximum thresholds conservatively for the actual mechanics and object materials before enabling adaptive grip. Start with low-risk, easily released objects, keep an emergency stop/power disconnect available, and supervise all tests. Adaptive control is experimental and does not replace a mechanical force limit or emergency stop.
+
 ## Per-servo motion profiles
 
 Each calibration card has an **Enabled** toggle and its own maximum speed in degrees per second and acceleration in degrees per second squared. When enabled, the Arduino uses those limits to ramp toward that servo's target and decelerate before reaching it. Defaults are 60°/s and 120°/s². Lower either value for gentler movement; profiles can be changed while connected. When disabled, the servo moves directly to each target, as in the original controller.
@@ -76,3 +86,4 @@ robot_control/
   window.py
 firmware/GripperController/GripperController.ino
 ```
+

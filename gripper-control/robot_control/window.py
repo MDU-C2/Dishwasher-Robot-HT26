@@ -20,6 +20,8 @@ from .config import (
     DEFAULT_FSR_GRIP_THRESHOLD, DEFAULT_FSR_MAX_THRESHOLD, DEFAULT_MAX_SPEED_DEG_S,
     DEFAULT_OPTICAL_MOTION_THRESHOLD, DEFAULT_OPTICAL_SQUAL_THRESHOLD,
     DEFAULT_LIDAR_THRESHOLD_MM, DEFAULT_LIDAR_REARM_MM,
+    DEFAULT_SLIP_LIDAR_SPEED_THRESHOLD, MIN_SLIP_LIDAR_SPEED_THRESHOLD,
+    MAX_SLIP_LIDAR_SPEED_THRESHOLD,
     FSR_PINS, FSR_STATE_LABELS, MAX_ACCELERATION_DEG_S2, MAX_FSR_THRESHOLD,
     MAX_MAX_SPEED_DEG_S, MAX_ANGLE, MAX_OPTICAL_MOTION_THRESHOLD,
     MAX_OPTICAL_SQUAL_THRESHOLD, MIN_ACCELERATION_DEG_S2, MIN_FSR_THRESHOLD,
@@ -32,7 +34,7 @@ from .calibration import ServoCalibration
 from .protocol import (
     grip_command, parse_line, set_angle, set_calibration, set_fsr_calibration,
     set_fsr_guard, set_motion_profile, set_optical_calibration, set_optical_led,
-    set_lidar_config,
+    set_lidar_config, set_slip_lidar_threshold, set_adaptive_grip,
     tare_fsr, zero_optical,
 )
 from .serial_worker import SerialWorker
@@ -141,6 +143,11 @@ class MainWindow(QMainWindow):
         self._opt_state = 3
         self._lidar_sensor_state = 0
         self._lidar_auto_confirmed = False
+        self._slip_state = 0
+        self._slip_confidence = 0
+        self._adaptive_targets = {
+            index: DEFAULT_FSR_GRIP_THRESHOLD for index in range(len(CONTINUOUS_SERVO_CHANNELS))
+        }
 
         self._build_ui()
         self.refresh_ports()
@@ -356,6 +363,7 @@ class MainWindow(QMainWindow):
             )
         )
         calibration_layout.addWidget(self._build_optical_calibration_card())
+        calibration_layout.addWidget(self._build_lidar_slip_calibration_card())
         calibration_layout.addStretch(1)
         self.tabs.addTab(calibration_page, "02  CALIBRATION")
 
@@ -451,6 +459,20 @@ class MainWindow(QMainWindow):
         stop_btn.clicked.connect(self._stop_all_fingers)
         actions.addWidget(stop_btn, 1)
         layout.addLayout(actions)
+
+        self.adaptive_grip_checkbox = QCheckBox("Adaptive grip · tighten gradually on confirmed slip")
+        self.adaptive_grip_checkbox.setToolTip(
+            "After AUTO-GRIP reaches its FSR targets, confirmed slip raises the affected finger target "
+            "in 40-count steps with a 1.2 s minimum interval. Optical-only slip adjusts finger 1; "
+            "LiDAR evidence adjusts all fingers. Each finger is capped by its configured FSR maximum."
+        )
+        adaptive_saved = self.settings.value("grip/adaptive_enabled", False, type=bool)
+        if adaptive_saved and not self.fsr_guard_checkbox.isChecked():
+            adaptive_saved = False
+            self.settings.setValue("grip/adaptive_enabled", False)
+        self.adaptive_grip_checkbox.setChecked(adaptive_saved)
+        self.adaptive_grip_checkbox.toggled.connect(self._toggle_adaptive_grip)
+        layout.addWidget(self.adaptive_grip_checkbox)
 
         self.grip_master_status = QLabel(
             "Connect Arduino to control all 3 fingers together with live FSR pressure limits."
@@ -604,6 +626,34 @@ class MainWindow(QMainWindow):
         self.lidar_status_label.setObjectName("Description")
         self.lidar_status_label.setWordWrap(True)
         lidar_layout.addWidget(self.lidar_status_label)
+
+        slip_panel = QFrame()
+        slip_panel.setObjectName("SubPanel")
+        slip_layout = QVBoxLayout(slip_panel)
+        slip_layout.setContentsMargins(10, 8, 10, 8)
+        slip_layout.setSpacing(6)
+        slip_header = QHBoxLayout()
+        slip_title = QLabel("SLIP DETECTION · SENSOR FUSION (STAGE 2 / ADAPTIVE)")
+        slip_title.setObjectName("Kicker")
+        slip_header.addWidget(slip_title)
+        slip_header.addStretch(1)
+        self.slip_state_badge = QLabel("WAITING FOR SENSORS")
+        self.slip_state_badge.setObjectName("OptState3")
+        slip_header.addWidget(self.slip_state_badge)
+        slip_layout.addLayout(slip_header)
+        self.slip_confidence_bar = QProgressBar()
+        self.slip_confidence_bar.setRange(0, 100)
+        self.slip_confidence_bar.setValue(0)
+        self.slip_confidence_bar.setFormat("%p% evidence")
+        slip_layout.addWidget(self.slip_confidence_bar)
+        self.slip_detail_label = QLabel(
+            "Optical skin motion: — · LiDAR range motion: —. Detection only; no motor or pressure changes are made."
+        )
+        self.slip_detail_label.setObjectName("Description")
+        self.slip_detail_label.setWordWrap(True)
+        slip_layout.addWidget(self.slip_detail_label)
+        lidar_layout.addWidget(slip_panel)
+
         self.lidar_threshold_spin.valueChanged.connect(self._lidar_threshold_changed)
         layout.addWidget(lidar_panel)
         return panel
@@ -703,6 +753,50 @@ class MainWindow(QMainWindow):
         self.opt_cal_note.setObjectName("Description")
         self.opt_cal_note.setWordWrap(True)
         layout.addWidget(self.opt_cal_note)
+        return panel
+
+    def _build_lidar_slip_calibration_card(self) -> QFrame:
+        panel = QFrame()
+        panel.setObjectName("CalibrationCard")
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(8)
+        title = QLabel("VL53L4CD · SLIP MOVEMENT SENSITIVITY")
+        title.setObjectName("ServoName")
+        layout.addWidget(title)
+        description = QLabel(
+            "Minimum palm-to-object range speed used as LiDAR slip evidence. Lower values are more sensitive; "
+            "the optical skin sensor can independently confirm slip even when LiDAR sees no range change."
+        )
+        description.setObjectName("Description")
+        description.setWordWrap(True)
+        layout.addWidget(description)
+        row = QHBoxLayout()
+        self.lidar_slip_sensitivity_spin = QSpinBox()
+        self.lidar_slip_sensitivity_spin.setRange(
+            MIN_SLIP_LIDAR_SPEED_THRESHOLD, MAX_SLIP_LIDAR_SPEED_THRESHOLD
+        )
+        self.lidar_slip_sensitivity_spin.setSingleStep(5)
+        self.lidar_slip_sensitivity_spin.setSuffix(" mm/s")
+        saved = self.settings.value(
+            "lidar/slip_speed_threshold_mm_s", DEFAULT_SLIP_LIDAR_SPEED_THRESHOLD, type=int
+        )
+        self.lidar_slip_sensitivity_spin.setValue(
+            max(MIN_SLIP_LIDAR_SPEED_THRESHOLD,
+                min(MAX_SLIP_LIDAR_SPEED_THRESHOLD, saved))
+        )
+        row.addWidget(self.lidar_slip_sensitivity_spin)
+        row.addStretch(1)
+        apply_btn = QPushButton("SAVE / APPLY LIDAR SENSITIVITY")
+        apply_btn.setObjectName("Primary")
+        apply_btn.clicked.connect(self._apply_lidar_slip_sensitivity)
+        row.addWidget(apply_btn)
+        layout.addLayout(row)
+        self.lidar_slip_sensitivity_note = QLabel(
+            "Lower threshold = more sensitive. Default: 20 mm/s."
+        )
+        self.lidar_slip_sensitivity_note.setObjectName("Description")
+        layout.addWidget(self.lidar_slip_sensitivity_note)
         return panel
 
     def _build_calibration_card(self, channel: int) -> QFrame:
@@ -1080,11 +1174,13 @@ class MainWindow(QMainWindow):
             self.cards[channel].set_angle(target_angle)
             self.pending[channel] = target_angle
         self.worker.send(set_fsr_guard(self.fsr_guard_checkbox.isChecked()))
+        self.worker.send(set_adaptive_grip(self.adaptive_grip_checkbox.isChecked()))
         for finger_index, channel in enumerate(CONTINUOUS_SERVO_CHANNELS):
             contact, grip, max_thr, invert = self._fsr_values(channel)
             self.worker.send(
                 set_fsr_calibration(finger_index, contact, grip, max_thr, invert)
             )
+            self._adaptive_targets[finger_index] = grip
             self.cards[channel].update_fsr(0, 0, 0, grip)
         self.worker.send(
             set_lidar_config(
@@ -1098,6 +1194,7 @@ class MainWindow(QMainWindow):
                 self.opt_motion_spin.value(), self.opt_squal_spin.value()
             )
         )
+        self.worker.send(set_slip_lidar_threshold(self.lidar_slip_sensitivity_spin.value()))
         self.worker.send(set_optical_led(self.opt_led_checkbox.isChecked()))
         self._flush_pending()
 
@@ -1216,9 +1313,10 @@ class MainWindow(QMainWindow):
         if self.settings.status() != QSettings.Status.NoError:
             self.fsr_cal_notes[channel].setText("COULD NOT SAVE FSR SETTINGS.")
             return
+        finger_index = CONTINUOUS_SERVO_CHANNELS.index(channel)
+        self._adaptive_targets[finger_index] = grip
         if channel in self.cards:
             self.cards[channel].update_fsr(0, 0, 0, grip)
-        finger_index = CONTINUOUS_SERVO_CHANNELS.index(channel)
         if self.arduino_ready and self.worker:
             self.worker.send(set_fsr_calibration(finger_index, contact, grip, max_thr, invert))
             self.fsr_cal_notes[channel].setText(
@@ -1230,13 +1328,33 @@ class MainWindow(QMainWindow):
                 f"SAVED: Contact {contact} / Stop {grip} / Max {max_thr}. Sent on next connect."
             )
 
+    def _toggle_adaptive_grip(self, enabled: bool) -> None:
+        if enabled and not self.fsr_guard_checkbox.isChecked():
+            self.adaptive_grip_checkbox.blockSignals(True)
+            self.adaptive_grip_checkbox.setChecked(False)
+            self.adaptive_grip_checkbox.blockSignals(False)
+            self.grip_master_status.setText(
+                "ENABLE THE FSR AUTO-STOP GUARD BEFORE USING ADAPTIVE GRIP."
+            )
+            return
+        self.settings.setValue("grip/adaptive_enabled", enabled)
+        self.settings.sync()
+        if self.arduino_ready and self.worker:
+            self.worker.send(set_adaptive_grip(enabled))
+        self.grip_master_status.setText(
+            "ADAPTIVE GRIP ENABLED: confirmed slip can increase finger targets gradually, "
+            "within each finger's FSR maximum."
+            if enabled else "ADAPTIVE GRIP DISABLED: auto-grip stops at the calibrated FSR targets."
+        )
+
     def _trigger_auto_grip(self) -> None:
         if not self.arduino_ready or not self.worker:
             self.grip_master_status.setText("CONNECT THE ARDUINO BEFORE STARTING AUTO-GRIP.")
             return
         self._grip_sync_active = True
-        for ch in CONTINUOUS_SERVO_CHANNELS:
+        for finger_index, ch in enumerate(CONTINUOUS_SERVO_CHANNELS):
             self.pending.pop(ch, None)
+            self._adaptive_targets[finger_index] = self.fsr_grip_spins[ch].value()
         self.worker.send(grip_command("START"))
         self.grip_master_status.setText(
             "AUTO-GRIP ACTIVE: Closing all 3 fingers until each FSR reaches its stop limit …"
@@ -1272,6 +1390,8 @@ class MainWindow(QMainWindow):
         self.grip_master_status.setText("ALL 3 FINGERS STOPPED.")
 
     def _toggle_fsr_guard(self, enabled: bool) -> None:
+        if not enabled and self.adaptive_grip_checkbox.isChecked():
+            self.adaptive_grip_checkbox.setChecked(False)
         self.settings.setValue("fsr/guard_enabled", enabled)
         self.settings.sync()
         if not enabled and self.lidar_auto_checkbox.isChecked():
@@ -1327,6 +1447,35 @@ class MainWindow(QMainWindow):
         if self.arduino_ready and self.worker:
             self._send_lidar_config(self.lidar_auto_checkbox.isChecked())
 
+    def _update_slip_display(
+        self, confidence: int, state: int, optical_active: bool, lidar_active: bool
+    ) -> None:
+        self._slip_confidence = max(0, min(100, confidence))
+        self._slip_state = state
+        self.slip_confidence_bar.setValue(self._slip_confidence)
+        labels = {
+            0: ("SENSOR DATA UNAVAILABLE", "OptState3"),
+            1: ("NO SLIP EVIDENCE", "OptState0"),
+            2: ("MOVEMENT SUSPECTED", "OptState2"),
+            3: ("CORROBORATED MOVEMENT", "OptState1"),
+            4: ("OPTICAL SLIP DETECTED", "OptState1"),
+            5: ("LIDAR MOVEMENT DETECTED", "OptState1"),
+        }
+        label, style = labels.get(state, labels[0])
+        self.slip_state_badge.setText(label)
+        self.slip_state_badge.setObjectName(style)
+        adaptive_note = (
+            "Adaptive tightening arms after AUTO-GRIP completes; per-finger FSR maxima remain in force."
+            if self.adaptive_grip_checkbox.isChecked()
+            else "Adaptive grip is disabled; this display is diagnostic only."
+        )
+        self.slip_detail_label.setText(
+            f"Optical skin motion: {'DETECTED' if optical_active else 'not detected / unavailable'} · "
+            f"LiDAR palm-to-object range motion: {'DETECTED' if lidar_active else 'not detected / unavailable'} · "
+            + adaptive_note
+        )
+        self._repolish(self.slip_state_badge)
+
     def _update_lidar_display(
         self, distance: int, speed: int, state: int, auto_enabled: bool, armed: bool
     ) -> None:
@@ -1375,6 +1524,23 @@ class MainWindow(QMainWindow):
             return
         self.worker.send(tare_fsr())
         self.grip_master_status.setText("ZERO / TARE SENT (KEEP ALL FINGERS UNLOADED) …")
+
+    def _apply_lidar_slip_sensitivity(self) -> None:
+        threshold = self.lidar_slip_sensitivity_spin.value()
+        self.settings.setValue("lidar/slip_speed_threshold_mm_s", threshold)
+        self.settings.sync()
+        if self.settings.status() != QSettings.Status.NoError:
+            self.lidar_slip_sensitivity_note.setText("COULD NOT SAVE LIDAR SENSITIVITY.")
+            return
+        if self.arduino_ready and self.worker:
+            self.worker.send(set_slip_lidar_threshold(threshold))
+            self.lidar_slip_sensitivity_note.setText(
+                f"ACTIVE: LiDAR slip evidence at ≥ {threshold} mm/s."
+            )
+        else:
+            self.lidar_slip_sensitivity_note.setText(
+                f"SAVED: ≥ {threshold} mm/s. Sent on next connection."
+            )
 
     def _reset_optical_defaults(self) -> None:
         self.opt_motion_spin.setValue(DEFAULT_OPTICAL_MOTION_THRESHOLD)
@@ -1523,7 +1689,10 @@ class MainWindow(QMainWindow):
                 return
             nets, raws, states = parsed[:3], parsed[3:6], parsed[6:9]
             for finger_index, ch in enumerate(CONTINUOUS_SERVO_CHANNELS):
-                grip_limit = self.fsr_grip_spins[ch].value() if ch in self.fsr_grip_spins else DEFAULT_FSR_GRIP_THRESHOLD
+                grip_limit = self._adaptive_targets.get(
+                    finger_index,
+                    self.fsr_grip_spins[ch].value() if ch in self.fsr_grip_spins else DEFAULT_FSR_GRIP_THRESHOLD,
+                )
                 if ch in self.cards:
                     self.cards[ch].update_fsr(
                         nets[finger_index], raws[finger_index], states[finger_index], grip_limit
@@ -1541,6 +1710,7 @@ class MainWindow(QMainWindow):
                 return
             if 0 <= finger < len(CONTINUOUS_SERVO_CHANNELS):
                 ch = CONTINUOUS_SERVO_CHANNELS[finger]
+                self._adaptive_targets[finger] = grip
                 if ch in self.fsr_cal_notes:
                     self.fsr_cal_notes[ch].setText(
                         f"ARDUINO CONFIRMED FSR: Contact {contact} / Stop {grip} / Max {max_thr}"
@@ -1572,6 +1742,11 @@ class MainWindow(QMainWindow):
             elif state == "STOPPED":
                 self._grip_sync_active = False
                 self.grip_master_status.setText("ALL 3 FINGERS STOPPED.")
+            elif state == "ADAPTIVE_READY":
+                self._grip_sync_active = False
+                self.grip_master_status.setText(
+                    "INITIAL GRIP COMPLETE · ADAPTIVE MONITORING ACTIVE. Confirmed slip can trigger small, FSR-limited adjustments."
+                )
             elif state == "CLOSING":
                 self.grip_master_status.setText(
                     "AUTO-GRIP CLOSING: Slowing on contact, stopping at FSR grip limits …"
@@ -1598,6 +1773,14 @@ class MainWindow(QMainWindow):
             except ValueError:
                 return
             self._update_optical_display(dx, dy, mag, total_x, total_y, state)
+        elif kind == "SLIP" and len(values) == 4:
+            try:
+                confidence, state, optical_active, lidar_active = map(int, values)
+            except ValueError:
+                return
+            self._update_slip_display(
+                confidence, state, bool(optical_active), bool(lidar_active)
+            )
         elif kind == "LIDAR" and len(values) == 5:
             try:
                 distance, speed, state, auto_enabled, armed = map(int, values)
@@ -1606,6 +1789,8 @@ class MainWindow(QMainWindow):
             self._update_lidar_display(distance, speed, state, bool(auto_enabled), bool(armed))
         elif kind == "LIDARTRIGGER" and len(values) == 1:
             self._grip_sync_active = True
+            for finger_index, ch in enumerate(CONTINUOUS_SERVO_CHANNELS):
+                self._adaptive_targets[finger_index] = self.fsr_grip_spins[ch].value()
             self.grip_master_status.setText(
                 f"LIDAR TRIGGERED AT {values[0]} mm · STARTING FSR-CONTROLLED AUTO-GRIP."
             )
@@ -1625,6 +1810,35 @@ class MainWindow(QMainWindow):
                 self.lidar_status_label.setText("AUTOMATIC GRIPPING DISABLED BECAUSE THE FSR GUARD WAS TURNED OFF.")
         elif kind == "ACKOPTZERO":
             self.opt_cal_note.setText("ARDUINO CONFIRMED: Total X / Y reset to 0.")
+        elif kind == "ACKADAPTIVE" and len(values) == 1:
+            self.grip_master_status.setText(
+                "ARDUINO CONFIRMED: ADAPTIVE GRIP ENABLED."
+                if values[0] == "1" else "ARDUINO CONFIRMED: ADAPTIVE GRIP DISABLED."
+            )
+        elif kind == "ADAPTIVE" and values:
+            if values[0] in ("STEP", "RESET") and len(values) == 3:
+                try:
+                    finger, target = map(int, values[1:])
+                except ValueError:
+                    return
+                if not 0 <= finger < len(CONTINUOUS_SERVO_CHANNELS):
+                    return
+                self._adaptive_targets[finger] = target
+                channel = CONTINUOUS_SERVO_CHANNELS[finger]
+                if channel in self.cards:
+                    self.cards[channel].update_fsr(0, 0, 0, target)
+                if values[0] == "STEP":
+                    self.grip_master_status.setText(
+                        f"ADAPTIVE ADJUSTMENT · FINGER {finger + 1} TARGET RAISED TO {target} / FSR COUNTS."
+                    )
+            elif values[0] == "LIMITS_REACHED_OR_SENSOR_FAULT":
+                self.grip_master_status.setText(
+                    "ADAPTIVE GRIP DID NOT TIGHTEN: all eligible fingers are at their configured limits or have sensor faults."
+                )
+        elif kind == "ACKSLIPCFG" and len(values) == 1:
+            self.lidar_slip_sensitivity_note.setText(
+                f"ARDUINO CONFIRMED LIDAR SLIP THRESHOLD: ≥ {values[0]} mm/s."
+            )
         elif kind == "ACKOPTCAL" and len(values) == 2:
             try:
                 motion_thr, squal_thr = map(int, values)
@@ -1676,6 +1890,9 @@ class MainWindow(QMainWindow):
             elif error == "LIDAR_SENSOR_OFFLINE":
                 self.lidar_status_label.setText("VL53L4CD IS OFFLINE; AUTOMATIC GRIPPING CANNOT BE ENABLED.")
                 self.lidar_auto_checkbox.setChecked(False)
+            elif error == "ADAPTIVE_REQUIRES_FSR_GUARD":
+                self.adaptive_grip_checkbox.setChecked(False)
+                self.grip_master_status.setText("ADAPTIVE GRIP REQUIRES THE FSR AUTO-STOP GUARD.")
 
     def _failed(self, reason: str) -> None:
         self._last_error = reason
