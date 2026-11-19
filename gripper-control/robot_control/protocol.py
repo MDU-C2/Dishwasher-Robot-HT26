@@ -58,3 +58,7 @@ def zero_optical() -> str:
 def parse_line(line: str) -> tuple[str, list[str]]:
     parts = line.strip().split(",")
     return (parts[0].upper(), parts[1:]) if parts and parts[0] else ("", [])
+
+
+def set_lidar_config(enabled: bool, threshold_mm: int, rearm_mm: int = 50) -> str:
+    return f"LIDARCFG,{int(enabled)},{threshold_mm},{rearm_mm}\n"

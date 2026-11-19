@@ -20,6 +20,8 @@
 #include <Wire.h>
 #include <Adafruit_PWMServoDriver.h>
 #include "Optical_Flow_Sensor.h"
+#include <VL53L4CD.h>
+#include <Optical_Flow_Sensor.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -44,6 +46,14 @@ constexpr uint8_t FSR_PINS[FSR_COUNT] = {A0, A1, A2};
 constexpr unsigned long FSR_SAMPLE_MS = 10;
 constexpr unsigned long FSR_REPORT_MS = 100;
 constexpr unsigned long AUTO_GRIP_TIMEOUT_MS = 6000;
+constexpr unsigned long LIDAR_POLL_INTERVAL_MS = 30;
+constexpr unsigned long LIDAR_REPORT_MS = 100;
+constexpr float LIDAR_SPEED_EMA_ALPHA = 0.30f;
+constexpr uint8_t LIDAR_ENTRY_SAMPLES = 3;
+constexpr uint16_t LIDAR_DEFAULT_THRESHOLD_MM = 150;
+constexpr uint16_t LIDAR_DEFAULT_REARM_MM = 50;
+constexpr uint16_t LIDAR_MIN_THRESHOLD_MM = 30;
+constexpr uint16_t LIDAR_MAX_THRESHOLD_MM = 1300;
 constexpr float FSR_EMA_ALPHA = 0.25f;
 constexpr int FSR_HYSTERESIS = 30;
 constexpr int FSR_MIN_THR = 10;
@@ -75,6 +85,7 @@ enum OpticalState : uint8_t {
 const SPISettings paaSpiSettings(2000000, MSBFIRST, SPI_MODE3);
 Optical_Flow_Sensor flow(PAA5100_CS_PIN, PAA5100);
 Adafruit_PWMServoDriver pca(PCA9685_ADDRESS);
+VL53L4CD lidarSensor;
 
 struct ServoConfig {
   uint16_t minUs;
@@ -136,6 +147,23 @@ uint16_t optMotionThreshold = 3;
 uint8_t optSqualThreshold = 0;
 unsigned long lastOpticalSampleAt = 0;
 unsigned long lastOpticalMotionAt = 0;
+
+bool lidarSensorOnline = false;
+bool lidarAutoEnabled = false;
+bool lidarArmed = false;
+bool lidarHasMeasurement = false;
+uint16_t lidarThresholdMm = LIDAR_DEFAULT_THRESHOLD_MM;
+uint16_t lidarRearmMm = LIDAR_DEFAULT_REARM_MM;
+int32_t lidarDistanceMm = -1;
+int32_t lidarSpeedMmPerSecond = 0;
+float lidarFilteredSpeed = 0.0f;
+int32_t lidarPreviousDistanceMm = -1;
+unsigned long lidarPreviousSampleAt = 0;
+unsigned long lastLidarSampleAt = 0;
+unsigned long lastLidarReportAt = 0;
+uint8_t lidarEntryCount = 0;
+uint8_t lidarClearCount = 0;
+uint8_t lidarState = 0;  // 0 offline, 1 valid measurement, 2 invalid/no target.
 
 bool parseNumber(const char* text, long& value) {
   if (!text || !*text) return false;
@@ -523,6 +551,141 @@ void sampleOpticalSensor(unsigned long now) {
   evaluateOpticalState(now, rawMag);
 }
 
+void handleGripCommand(const char* action);
+
+bool initLidarSensor() {
+  lidarSensor.setBus(&Wire1);
+  lidarSensor.setTimeout(100);
+  if (!lidarSensor.init()) {
+    lidarSensorOnline = false;
+    lidarState = 0;
+    return false;
+  }
+  lidarSensor.setRangeTiming(20, 25);  // 20 ms budget, 25 ms between measurements
+  lidarSensor.startContinuous();
+  lidarSensorOnline = true;
+  lidarState = 2;
+  lidarHasMeasurement = false;
+  lidarPreviousDistanceMm = -1;
+  lidarPreviousSampleAt = 0;
+  lidarFilteredSpeed = 0.0f;
+  lidarSpeedMmPerSecond = 0;
+  lidarEntryCount = 0;
+  lidarArmed = false;
+  return true;
+}
+
+void sampleLidarSensor(unsigned long now) {
+  if (!lidarSensorOnline) return;
+  if (now - lastLidarSampleAt < LIDAR_POLL_INTERVAL_MS) return;
+  lastLidarSampleAt = now;
+  if (!lidarSensor.dataReady()) {
+    if (lidarPreviousSampleAt > 0 && now - lidarPreviousSampleAt > 500) {
+      lidarState = 2;
+      lidarHasMeasurement = false;
+      lidarSpeedMmPerSecond = 0;
+      lidarFilteredSpeed = 0.0f;
+      lidarEntryCount = 0;
+    }
+    return;
+  }
+
+  lidarSensor.read(false);  // data is already ready, so don't block
+  const uint16_t measured = lidarSensor.ranging_data.range_mm;
+  const uint8_t rangeStatus = (uint8_t)lidarSensor.ranging_data.range_status;
+  if (rangeStatus != 0 || measured == 0 || measured > 1300) {
+    lidarState = 2;
+    lidarHasMeasurement = false;
+    lidarPreviousDistanceMm = -1;
+    lidarPreviousSampleAt = 0;
+    lidarFilteredSpeed *= 0.5f;
+    lidarSpeedMmPerSecond = (int32_t)lroundf(lidarFilteredSpeed);
+    lidarEntryCount = 0;
+    // Range status status 1 is a sigma failure and 2 is a signal failure. Repeated
+    // no-return readings are treated as a clear field of view for re-arming.
+    if (lidarAutoEnabled && (rangeStatus == 1 || rangeStatus == 2)) {
+      if (lidarClearCount < LIDAR_ENTRY_SAMPLES) ++lidarClearCount;
+      if (lidarClearCount >= LIDAR_ENTRY_SAMPLES && !lidarArmed) {
+        lidarArmed = true;
+        Serial.println("LIDARSTATE,ARMED");
+      }
+    } else {
+      lidarClearCount = 0;
+    }
+    return;
+  }
+
+  lidarClearCount = 0;
+  const int32_t previous = lidarDistanceMm;
+  const unsigned long previousAt = lidarPreviousSampleAt;
+  lidarDistanceMm = measured;
+  lidarState = 1;
+  lidarHasMeasurement = true;
+  if (previous >= 0 && previousAt > 0 && now > previousAt) {
+    const float dt = (now - previousAt) / 1000.0f;
+    if (dt > 0.0f && dt <= 0.5f) {
+      const float rawSpeed = ((float)measured - (float)previous) / dt;
+      lidarFilteredSpeed = (LIDAR_SPEED_EMA_ALPHA * rawSpeed) +
+                           ((1.0f - LIDAR_SPEED_EMA_ALPHA) * lidarFilteredSpeed);
+      lidarSpeedMmPerSecond = (int32_t)lroundf(lidarFilteredSpeed);
+    } else {
+      lidarFilteredSpeed = 0.0f;
+      lidarSpeedMmPerSecond = 0;
+    }
+  } else {
+    lidarFilteredSpeed = 0.0f;
+    lidarSpeedMmPerSecond = 0;
+  }
+  lidarPreviousDistanceMm = measured;
+  lidarPreviousSampleAt = now;
+
+  if (lidarAutoEnabled && !lidarArmed && measured >= (uint32_t)lidarThresholdMm + lidarRearmMm) {
+    lidarArmed = true;
+    lidarEntryCount = 0;
+    lidarClearCount = 0;
+    Serial.println("LIDARSTATE,ARMED");
+  }
+}
+
+void updateLidarAutoGrip() {
+  if (!lidarAutoEnabled || !lidarSensorOnline || lidarState != 1 || !lidarHasMeasurement) return;
+  if (!lidarArmed || autoGripActive) return;
+  // Do not take control away from an active manual finger command.
+  for (uint8_t f = 0; f < FSR_COUNT; ++f) {
+    const int servoIdx = findServoIndex(CONTINUOUS_SERVO_FIRST_CHANNEL + f);
+    if (servoIdx >= 0 && targets[servoIdx] != DEFAULT_ANGLE) return;
+  }
+
+  if (lidarDistanceMm <= lidarThresholdMm) {
+    if (lidarEntryCount < LIDAR_ENTRY_SAMPLES) ++lidarEntryCount;
+  } else {
+    lidarEntryCount = 0;
+  }
+
+  if (lidarEntryCount < LIDAR_ENTRY_SAMPLES) return;
+  lidarArmed = false;
+  lidarEntryCount = 0;
+  Serial.print("LIDARTRIGGER,");
+  Serial.println(lidarDistanceMm);
+  // The existing FSR-controlled auto-grip routine owns all finger movement and stopping.
+  handleGripCommand("START");
+}
+
+void reportLidarTelemetry(unsigned long now) {
+  if (!hostConnected || now - lastLidarReportAt < LIDAR_REPORT_MS) return;
+  lastLidarReportAt = now;
+  Serial.print("LIDAR,");
+  Serial.print(lidarState == 1 ? lidarDistanceMm : -1);
+  Serial.print(',');
+  Serial.print(lidarSpeedMmPerSecond);
+  Serial.print(',');
+  Serial.print(lidarState);
+  Serial.print(',');
+  Serial.print(lidarAutoEnabled ? 1 : 0);
+  Serial.print(',');
+  Serial.println(lidarArmed ? 1 : 0);
+}
+
 void updateMotion(unsigned long now) {
   if (now - lastMotionUpdateAt < MOTION_UPDATE_MS) return;
   float dt = (now - lastMotionUpdateAt) / 1000.0f;
@@ -743,6 +906,7 @@ void handleCommand(char* command) {
 
   if (strcmp(command, "HELLO") == 0) {
     if (!opticalSensorOnline) initOpticalSensor();
+    if (!lidarSensorOnline) initLidarSensor();
     Serial.print("READY,");
     Serial.println(SERVO_COUNT);
     return;
@@ -778,6 +942,16 @@ void handleCommand(char* command) {
       return;
     }
     fsrGuardEnabled = (enabled == 1);
+    if (!fsrGuardEnabled) {
+      if (lidarAutoEnabled) {
+        lidarAutoEnabled = false;
+        lidarArmed = false;
+        lidarEntryCount = 0;
+        Serial.println("LIDARSTATE,DISABLED_FSR_GUARD");
+      }
+      // Never let an automatic grip continue after its FSR stop guard is removed.
+      if (autoGripActive) handleGripCommand("STOP");
+    }
     Serial.print("ACKFSRGUARD,");
     Serial.println(fsrGuardEnabled ? 1 : 0);
     return;
@@ -788,6 +962,52 @@ void handleCommand(char* command) {
   }
   if (strncmp(command, "GRIP,", 5) == 0) {
     handleGripCommand(command + 5);
+    return;
+  }
+  if (strncmp(command, "LIDARCFG,", 9) == 0) {
+    char* enabledText = command + 9;
+    char* firstComma = strchr(enabledText, ',');
+    if (!firstComma) {
+      Serial.println("ERR,BAD_LIDARCFG_FORMAT");
+      return;
+    }
+    *firstComma = '\0';
+    char* thresholdText = firstComma + 1;
+    char* secondComma = strchr(thresholdText, ',');
+    if (!secondComma) {
+      Serial.println("ERR,BAD_LIDARCFG_FORMAT");
+      return;
+    }
+    *secondComma = '\0';
+    long enabled = 0, threshold = 0, rearm = 0;
+    if (!parseNumber(enabledText, enabled) || (enabled != 0 && enabled != 1) ||
+        !parseNumber(thresholdText, threshold) || !parseNumber(secondComma + 1, rearm) ||
+        threshold < LIDAR_MIN_THRESHOLD_MM || threshold > LIDAR_MAX_THRESHOLD_MM ||
+        rearm < 10 || rearm > 500) {
+      Serial.println("ERR,BAD_LIDARCFG_RANGE");
+      return;
+    }
+    if (enabled == 1 && !lidarSensorOnline) {
+      Serial.println("ERR,LIDAR_SENSOR_OFFLINE");
+      return;
+    }
+    if (enabled == 1 && !fsrGuardEnabled) {
+      Serial.println("ERR,LIDAR_REQUIRES_FSR_GUARD");
+      return;
+    }
+    lidarThresholdMm = (uint16_t)threshold;
+    lidarRearmMm = (uint16_t)rearm;
+    lidarAutoEnabled = (enabled == 1);
+    lidarArmed = false;
+    lidarEntryCount = 0;
+    lidarClearCount = 0;
+    Serial.print("ACKLIDARCFG,");
+    Serial.print(lidarAutoEnabled ? 1 : 0);
+    Serial.print(',');
+    Serial.print(lidarThresholdMm);
+    Serial.print(',');
+    Serial.println(lidarRearmMm);
+    Serial.println(lidarAutoEnabled ? "LIDARSTATE,WAITING_FOR_CLEAR" : "LIDARSTATE,DISABLED");
     return;
   }
   if (strncmp(command, "OPTCAL,", 7) == 0) {
@@ -921,6 +1141,8 @@ void setup() {
   analogReadResolution(12);
   recoverI2CBus();
   Wire.begin();
+  Wire1.begin();
+  Wire1.setClock(400000);
 #if defined(WIRE_HAS_TIMEOUT)
   Wire.setWireTimeout(3000, true);
 #endif
@@ -934,6 +1156,7 @@ void setup() {
   centerAll();
   sampleFsrSensors(millis(), true);
   initOpticalSensor();
+  initLidarSensor();
   Serial.print("READY,");
   Serial.println(SERVO_COUNT);
 }
@@ -963,6 +1186,9 @@ void loop() {
   if (hostConnected && (millis() - lastHostActivityAt > HOST_INACTIVITY_TIMEOUT_MS)) {
     hostConnected = false;
     cancelAutoGrip();
+    lidarAutoEnabled = false;
+    lidarArmed = false;
+    lidarEntryCount = 0;
     for (uint8_t f = 0; f < FSR_COUNT; ++f) {
       const int servoIdx = findServoIndex(CONTINUOUS_SERVO_FIRST_CHANNEL + f);
       if (servoIdx >= 0 && targets[servoIdx] != DEFAULT_ANGLE) {
@@ -975,6 +1201,9 @@ void loop() {
   const unsigned long tick = millis();
   sampleFsrSensors(tick, false);
   sampleOpticalSensor(tick);
+  sampleLidarSensor(tick);
+  updateLidarAutoGrip();
   updateMotion(tick);
   reportTelemetry(tick);
+  reportLidarTelemetry(tick);
 }

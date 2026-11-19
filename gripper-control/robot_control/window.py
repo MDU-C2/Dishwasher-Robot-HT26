@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import time
+from collections import deque
 
 import serial.tools.list_ports
-from PySide6.QtCore import QSettings, QTimer, Qt
+from PySide6.QtCore import QSettings, QTimer, Qt, QPointF
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QMainWindow,
     QProgressBar, QPushButton, QScrollArea, QSpinBox, QTabWidget, QVBoxLayout, QWidget,
@@ -17,21 +19,96 @@ from .config import (
     DEFAULT_CONTINUOUS_CALIBRATION_US, DEFAULT_FSR_CONTACT_THRESHOLD,
     DEFAULT_FSR_GRIP_THRESHOLD, DEFAULT_FSR_MAX_THRESHOLD, DEFAULT_MAX_SPEED_DEG_S,
     DEFAULT_OPTICAL_MOTION_THRESHOLD, DEFAULT_OPTICAL_SQUAL_THRESHOLD,
+    DEFAULT_LIDAR_THRESHOLD_MM, DEFAULT_LIDAR_REARM_MM,
     FSR_PINS, FSR_STATE_LABELS, MAX_ACCELERATION_DEG_S2, MAX_FSR_THRESHOLD,
     MAX_MAX_SPEED_DEG_S, MAX_ANGLE, MAX_OPTICAL_MOTION_THRESHOLD,
     MAX_OPTICAL_SQUAL_THRESHOLD, MIN_ACCELERATION_DEG_S2, MIN_FSR_THRESHOLD,
     MIN_MAX_SPEED_DEG_S, MIN_ANGLE, MIN_OPTICAL_MOTION_THRESHOLD,
     MIN_OPTICAL_SQUAL_THRESHOLD, OPTICAL_SPI_PINS, OPTICAL_STATE_LABELS,
+    MIN_LIDAR_THRESHOLD_MM, MAX_LIDAR_THRESHOLD_MM,
     PULSE_MAX_ALLOWED_US, PULSE_MIN_ALLOWED_US, SERVO_CHANNELS,
 )
 from .calibration import ServoCalibration
 from .protocol import (
     grip_command, parse_line, set_angle, set_calibration, set_fsr_calibration,
     set_fsr_guard, set_motion_profile, set_optical_calibration, set_optical_led,
+    set_lidar_config,
     tare_fsr, zero_optical,
 )
 from .serial_worker import SerialWorker
 from .servo_card import ServoCard
+
+
+class DistanceHistoryWidget(QWidget):
+    """Compact rolling distance plot; 120 samples at 10 Hz show about 12 seconds."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.samples: deque[int] = deque(maxlen=120)
+        self.setMinimumHeight(105)
+        self.setMaximumHeight(145)
+        self.setToolTip("Recent VL53L4CD distance measurements; approximately 12 seconds of history.")
+
+    def add_sample(self, distance_mm: int) -> None:
+        self.samples.append(distance_mm)
+        self.update()
+
+    def clear(self) -> None:
+        self.samples.clear()
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.fillRect(self.rect(), QColor("#101214"))
+        area = self.rect().adjusted(38, 8, -8, -20)
+        if area.width() <= 1 or area.height() <= 1:
+            return
+
+        painter.setPen(QPen(QColor("#303640"), 1))
+        for i in range(4):
+            y = area.top() + (area.height() * i / 3.0)
+            painter.drawLine(QPointF(area.left(), y), QPointF(area.right(), y))
+
+        if len(self.samples) < 2:
+            painter.setPen(QColor("#8B929E"))
+            painter.drawText(area, Qt.AlignmentFlag.AlignCenter, "WAITING FOR DISTANCE SAMPLES")
+            return
+
+        low = min(self.samples)
+        high = max(self.samples)
+        if high - low < 50:
+            low -= 25
+            high += 25
+        else:
+            margin = max(10, int((high - low) * 0.08))
+            low -= margin
+            high += margin
+        span = max(1, high - low)
+
+        painter.setPen(QColor("#8B929E"))
+        painter.drawText(2, area.top() + 5, f"{high} mm")
+        painter.drawText(2, area.bottom(), f"{low} mm")
+
+        path = QPainterPath()
+        count = len(self.samples)
+        for index, value in enumerate(self.samples):
+            x = area.left() + (area.width() * index / max(1, count - 1))
+            y = area.bottom() - ((value - low) / span) * area.height()
+            point = QPointF(x, y)
+            if index == 0:
+                path.moveTo(point)
+            else:
+                path.lineTo(point)
+        painter.setPen(QPen(QColor("#E5A93C"), 2))
+        painter.drawPath(path)
+        painter.setPen(QColor("#8B929E"))
+        painter.drawText(
+            self.rect().adjusted(38, 0, -8, 0),
+            Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignRight,
+            "OLDER  ←                         →  NOW",
+        )
+        painter.end()
 
 
 class MainWindow(QMainWindow):
@@ -62,6 +139,8 @@ class MainWindow(QMainWindow):
         self.fsr_cal_notes: dict[int, QLabel] = {}
         self._grip_sync_active = False
         self._opt_state = 3
+        self._lidar_sensor_state = 0
+        self._lidar_auto_confirmed = False
 
         self._build_ui()
         self.refresh_ports()
@@ -447,6 +526,86 @@ class MainWindow(QMainWindow):
         self.opt_value_label.setWordWrap(True)
         opt_layout.addWidget(self.opt_value_label)
         layout.addWidget(opt_panel)
+
+        lidar_panel = QFrame()
+        lidar_panel.setObjectName("SubPanel")
+        lidar_layout = QVBoxLayout(lidar_panel)
+        lidar_layout.setContentsMargins(10, 8, 10, 8)
+        lidar_layout.setSpacing(8)
+
+        lidar_header = QHBoxLayout()
+        lidar_title = QLabel("VL53L4CD LiDAR · DISTANCE & APPROACH SPEED")
+        lidar_title.setObjectName("Kicker")
+        lidar_header.addWidget(lidar_title)
+        lidar_header.addStretch(1)
+        self.lidar_state_badge = QLabel("SENSOR OFFLINE")
+        self.lidar_state_badge.setObjectName("OptState3")
+        lidar_header.addWidget(self.lidar_state_badge)
+        lidar_layout.addLayout(lidar_header)
+
+        readouts = QGridLayout()
+        readouts.setHorizontalSpacing(18)
+        self.lidar_distance_label = QLabel("— mm")
+        self.lidar_distance_label.setObjectName("Hero")
+        self.lidar_speed_label = QLabel("— mm/s")
+        self.lidar_speed_label.setObjectName("Hero")
+        distance_col = QVBoxLayout()
+        distance_caption = QLabel("DISTANCE")
+        distance_caption.setObjectName("SmallCaps")
+        distance_col.addWidget(distance_caption)
+        distance_col.addWidget(self.lidar_distance_label)
+        speed_col = QVBoxLayout()
+        speed_caption = QLabel("RADIAL SPEED  ·  − = APPROACHING")
+        speed_caption.setObjectName("SmallCaps")
+        speed_col.addWidget(speed_caption)
+        speed_col.addWidget(self.lidar_speed_label)
+        readouts.addLayout(distance_col, 0, 0)
+        readouts.addLayout(speed_col, 0, 1)
+        lidar_layout.addLayout(readouts)
+
+        plot_caption = QLabel("DISTANCE HISTORY · APPROX. LAST 12 SECONDS")
+        plot_caption.setObjectName("SmallCaps")
+        lidar_layout.addWidget(plot_caption)
+        self.lidar_plot = DistanceHistoryWidget()
+        lidar_layout.addWidget(self.lidar_plot)
+
+        controls = QHBoxLayout()
+        self.lidar_threshold_spin = QSpinBox()
+        self.lidar_threshold_spin.setRange(MIN_LIDAR_THRESHOLD_MM, MAX_LIDAR_THRESHOLD_MM)
+        self.lidar_threshold_spin.setSingleStep(10)
+        self.lidar_threshold_spin.setSuffix(" mm")
+        saved_threshold = self.settings.value(
+            "lidar/threshold_mm", DEFAULT_LIDAR_THRESHOLD_MM, type=int
+        )
+        self.lidar_threshold_spin.setValue(
+            max(MIN_LIDAR_THRESHOLD_MM, min(MAX_LIDAR_THRESHOLD_MM, saved_threshold))
+        )
+        threshold_col = QVBoxLayout()
+        threshold_lbl = QLabel("TRIGGER DISTANCE")
+        threshold_lbl.setObjectName("SmallCaps")
+        threshold_col.addWidget(threshold_lbl)
+        threshold_col.addWidget(self.lidar_threshold_spin)
+        controls.addLayout(threshold_col)
+
+        self.lidar_auto_checkbox = QCheckBox("Automatic grip on entry")
+        self.lidar_auto_checkbox.setToolTip(
+            "When armed, entering the threshold starts the existing three-finger FSR-controlled auto-grip."
+        )
+        self.lidar_auto_checkbox.setChecked(
+            self.settings.value("lidar/auto_enabled", False, type=bool)
+        )
+        self.lidar_auto_checkbox.toggled.connect(self._toggle_lidar_auto)
+        controls.addWidget(self.lidar_auto_checkbox, 1, alignment=Qt.AlignmentFlag.AlignVCenter)
+        lidar_layout.addLayout(controls)
+
+        self.lidar_status_label = QLabel(
+            "Connect Arduino. Automatic grip requires the FSR Auto-Stop Guard."
+        )
+        self.lidar_status_label.setObjectName("Description")
+        self.lidar_status_label.setWordWrap(True)
+        lidar_layout.addWidget(self.lidar_status_label)
+        self.lidar_threshold_spin.valueChanged.connect(self._lidar_threshold_changed)
+        layout.addWidget(lidar_panel)
         return panel
 
     def _build_optical_calibration_card(self) -> QFrame:
@@ -928,6 +1087,13 @@ class MainWindow(QMainWindow):
             )
             self.cards[channel].update_fsr(0, 0, 0, grip)
         self.worker.send(
+            set_lidar_config(
+                self.lidar_auto_checkbox.isChecked(),
+                self.lidar_threshold_spin.value(),
+                DEFAULT_LIDAR_REARM_MM,
+            )
+        )
+        self.worker.send(
             set_optical_calibration(
                 self.opt_motion_spin.value(), self.opt_squal_spin.value()
             )
@@ -1108,6 +1274,8 @@ class MainWindow(QMainWindow):
     def _toggle_fsr_guard(self, enabled: bool) -> None:
         self.settings.setValue("fsr/guard_enabled", enabled)
         self.settings.sync()
+        if not enabled and self.lidar_auto_checkbox.isChecked():
+            self.lidar_auto_checkbox.setChecked(False)
         if self.arduino_ready and self.worker:
             self.worker.send(set_fsr_guard(enabled))
         self.grip_master_status.setText(
@@ -1115,6 +1283,91 @@ class MainWindow(QMainWindow):
             if enabled
             else "WARNING: FSR Auto-Stop Guard DISABLED (manual pressure monitoring only)."
         )
+
+    def _send_lidar_config(self, enabled: bool) -> None:
+        if self.arduino_ready and self.worker:
+            self.worker.send(
+                set_lidar_config(enabled, self.lidar_threshold_spin.value(), DEFAULT_LIDAR_REARM_MM)
+            )
+
+    def _toggle_lidar_auto(self, enabled: bool) -> None:
+        if enabled and not self.fsr_guard_checkbox.isChecked():
+            self.lidar_auto_checkbox.blockSignals(True)
+            self.lidar_auto_checkbox.setChecked(False)
+            self.lidar_auto_checkbox.blockSignals(False)
+            self.lidar_status_label.setText(
+                "ENABLE THE FSR AUTO-STOP GUARD BEFORE ENABLING AUTOMATIC GRIPPING."
+            )
+            return
+        self.settings.setValue("lidar/auto_enabled", enabled)
+        self.settings.sync()
+        if not self.arduino_ready or not self.worker:
+            self.lidar_status_label.setText(
+                "SETTING SAVED. CONNECT THE ARDUINO TO APPLY IT."
+                if enabled else "AUTOMATIC GRIPPING DISABLED. DISTANCE MONITORING REMAINS ACTIVE WHEN CONNECTED."
+            )
+            return
+        if enabled and self._lidar_sensor_state != 1:
+            self.lidar_auto_checkbox.blockSignals(True)
+            self.lidar_auto_checkbox.setChecked(False)
+            self.lidar_auto_checkbox.blockSignals(False)
+            self.settings.setValue("lidar/auto_enabled", False)
+            self.settings.sync()
+            self.lidar_status_label.setText("LIDAR SENSOR IS NOT REPORTING VALID DISTANCE DATA.")
+            return
+        self._send_lidar_config(enabled)
+        self.lidar_status_label.setText(
+            "AUTO-GRIP ENABLED. WAITING FOR A CLEAR ZONE BEFORE ARMING."
+            if enabled else "AUTOMATIC GRIPPING DISABLED. DISTANCE MONITORING CONTINUES."
+        )
+
+    def _lidar_threshold_changed(self, value: int) -> None:
+        self.settings.setValue("lidar/threshold_mm", value)
+        self.settings.sync()
+        if self.arduino_ready and self.worker:
+            self._send_lidar_config(self.lidar_auto_checkbox.isChecked())
+
+    def _update_lidar_display(
+        self, distance: int, speed: int, state: int, auto_enabled: bool, armed: bool
+    ) -> None:
+        self._lidar_sensor_state = state
+        if state == 1 and distance >= 0:
+            self.lidar_plot.add_sample(distance)
+            self.lidar_distance_label.setText(f"{distance} mm")
+            self.lidar_speed_label.setText(f"{speed:+d} mm/s")
+            if speed < -20:
+                trend = "APPROACHING"
+            elif speed > 20:
+                trend = "RECEDING"
+            else:
+                trend = "STATIONARY"
+            self.lidar_state_badge.setText("SENSOR ONLINE")
+            self.lidar_state_badge.setObjectName("OptState0")
+            self.lidar_status_label.setText(
+                f"{trend} · AUTO-GRIP {'ARMED' if armed else ('WAITING FOR CLEAR ZONE' if auto_enabled else 'DISABLED')} · "
+                f"TRIGGER AT {self.lidar_threshold_spin.value()} mm"
+            )
+        elif state == 0:
+            self.lidar_distance_label.setText("— mm")
+            self.lidar_speed_label.setText("— mm/s")
+            self.lidar_state_badge.setText("SENSOR OFFLINE")
+            self.lidar_state_badge.setObjectName("OptState3")
+            self.lidar_status_label.setText("VL53L4CD NOT FOUND. CHECK QWIIC / I²C CONNECTION.")
+        else:
+            self.lidar_distance_label.setText("NO TARGET")
+            self.lidar_speed_label.setText(f"{speed:+d} mm/s")
+            self.lidar_state_badge.setText("NO VALID RANGE")
+            self.lidar_state_badge.setObjectName("OptState2")
+            self.lidar_status_label.setText(
+                "SENSOR ONLINE, BUT NO VALID RANGE IS AVAILABLE. AUTOMATIC TRIGGER IS INHIBITED."
+            )
+        self._repolish(self.lidar_state_badge)
+        if auto_enabled != self.lidar_auto_checkbox.isChecked():
+            self.lidar_auto_checkbox.blockSignals(True)
+            self.lidar_auto_checkbox.setChecked(auto_enabled)
+            self.lidar_auto_checkbox.blockSignals(False)
+            self.settings.setValue("lidar/auto_enabled", auto_enabled)
+            self.settings.sync()
 
     def _tare_fsrs(self) -> None:
         if not self.arduino_ready or not self.worker:
@@ -1345,6 +1598,31 @@ class MainWindow(QMainWindow):
             except ValueError:
                 return
             self._update_optical_display(dx, dy, mag, total_x, total_y, state)
+        elif kind == "LIDAR" and len(values) == 5:
+            try:
+                distance, speed, state, auto_enabled, armed = map(int, values)
+            except ValueError:
+                return
+            self._update_lidar_display(distance, speed, state, bool(auto_enabled), bool(armed))
+        elif kind == "LIDARTRIGGER" and len(values) == 1:
+            self._grip_sync_active = True
+            self.grip_master_status.setText(
+                f"LIDAR TRIGGERED AT {values[0]} mm · STARTING FSR-CONTROLLED AUTO-GRIP."
+            )
+            self.lidar_status_label.setText(
+                f"OBJECT ENTERED {self.lidar_threshold_spin.value()} mm THRESHOLD · GRIP STARTED."
+            )
+        elif kind == "LIDARSTATE" and len(values) == 1:
+            state = values[0]
+            if state == "WAITING_FOR_CLEAR":
+                self.lidar_status_label.setText("AUTO-GRIP ENABLED · WAITING FOR OBJECT TO MOVE OUTSIDE THE RE-ARM ZONE.")
+            elif state == "ARMED":
+                self.lidar_status_label.setText("AUTO-GRIP ARMED · WAITING FOR AN OBJECT TO ENTER THE THRESHOLD.")
+            elif state == "DISABLED":
+                self.lidar_status_label.setText("AUTOMATIC GRIPPING DISABLED.")
+            elif state == "DISABLED_FSR_GUARD":
+                self.lidar_auto_checkbox.setChecked(False)
+                self.lidar_status_label.setText("AUTOMATIC GRIPPING DISABLED BECAUSE THE FSR GUARD WAS TURNED OFF.")
         elif kind == "ACKOPTZERO":
             self.opt_cal_note.setText("ARDUINO CONFIRMED: Total X / Y reset to 0.")
         elif kind == "ACKOPTCAL" and len(values) == 2:
@@ -1390,7 +1668,14 @@ class MainWindow(QMainWindow):
                     f"APP EXPECTS {len(SERVO_CHANNELS)}. RE-UPLOAD FIRMWARE."
                 )
         elif kind == "ERR":
-            self.connection_note.setText(f"ARDUINO: {','.join(values)}")
+            error = ",".join(values)
+            self.connection_note.setText(f"ARDUINO: {error}")
+            if error == "LIDAR_REQUIRES_FSR_GUARD":
+                self.lidar_status_label.setText("AUTOMATIC GRIPPING REQUIRES THE FSR AUTO-STOP GUARD.")
+                self.lidar_auto_checkbox.setChecked(False)
+            elif error == "LIDAR_SENSOR_OFFLINE":
+                self.lidar_status_label.setText("VL53L4CD IS OFFLINE; AUTOMATIC GRIPPING CANNOT BE ENABLED.")
+                self.lidar_auto_checkbox.setChecked(False)
 
     def _failed(self, reason: str) -> None:
         self._last_error = reason
@@ -1407,6 +1692,8 @@ class MainWindow(QMainWindow):
         for ch, note in self.fsr_cal_notes.items():
             note.setText(f"Live {FSR_PINS.get(ch, 'FSR')}: waiting for Arduino connection …")
         self._update_optical_display(0, 0, 0, 0, 0, 3)
+        self._update_lidar_display(-1, 0, 0, False, False)
+        self.lidar_plot.clear()
         self.opt_cal_note.setText(
             f"SPI pins: {OPTICAL_SPI_PINS}. Connect Arduino and move a surface 15–35 mm below the lens to tune."
         )
@@ -1449,7 +1736,11 @@ class MainWindow(QMainWindow):
     def _continuous_stop_commands(self) -> tuple[str, ...]:
         if not self.arduino_ready:
             return ()
-        return tuple(set_angle(channel, DEFAULT_ANGLE) for channel in CONTINUOUS_SERVO_CHANNELS)
+        # Disarm autonomous triggering before the final finger-stop commands.
+        lidar_off = set_lidar_config(False, self.lidar_threshold_spin.value(), DEFAULT_LIDAR_REARM_MM)
+        return (lidar_off,) + tuple(
+            set_angle(channel, DEFAULT_ANGLE) for channel in CONTINUOUS_SERVO_CHANNELS
+        )
 
     def _set_status(self, style: str, text: str) -> None:
         self.status.setObjectName(style)

@@ -3,7 +3,7 @@ import unittest
 from robot_control.protocol import (
     grip_command, parse_line, set_angle, set_calibration, set_fsr_calibration,
     set_fsr_guard, set_motion_profile, set_optical_calibration, set_optical_led,
-    tare_fsr, zero_optical,
+    tare_fsr, zero_optical, set_lidar_config,
 )
 
 
@@ -43,6 +43,14 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(
             parse_line("OPT,-3,7,8,40,75,1\n"),
             ("OPT", ["-3", "7", "8", "40", "75", "1"]),
+        )
+
+    def test_lidar_configuration_command(self):
+        self.assertEqual(set_lidar_config(True, 150, 50), "LIDARCFG,1,150,50\n")
+        self.assertEqual(set_lidar_config(False, 250, 75), "LIDARCFG,0,250,75\n")
+        self.assertEqual(
+            parse_line("LIDAR,240,-125,1,1,1\n"),
+            ("LIDAR", ["240", "-125", "1", "1", "1"]),
         )
 
     def test_empty_line(self):
