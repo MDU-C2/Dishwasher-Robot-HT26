@@ -1,10 +1,12 @@
-Run detection model v5, v5s, v8, or v11Z? Enter 5, 5s, 8, or 11: [MODEL] Selected v5s.
+Run detection model v5, v5s, new5s, v8, v11Z, or v11n? Enter 5, 5s, new5s, 8, 11, or 11n: [MODEL] Selected v5s.
 Run 2D tray detection with YOLO or Normal Thresholding? Enter y (yolo) or t (threshold) [default=yolo]: [TRAY MODE] Selected YOLO (best.pt).
 [TRAY] 5 camera slot(s), 15 robot coordinate(s).
 [TRAY] Camera 1 ready in 2.1s
-[TRAY YOLO WARNING] Model file not found at: E:\10-23\main_tray_vs\best.pt. Falling back to image diff.
-[SCAN-YOLO] slot_1 free (7%), slot_2 free (2%), slot_3 free (1%), slot_4 free (0%), slot_5 free (2%)
-[SCAN-YOLO] slot_1 free (7%), slot_2 free (2%), slot_3 free (1%), slot_4 free (0%), slot_5 free (2%)
+[TRAY YOLO] Loading YOLO model from E:\10-23\main_tray_vs\best.pt...
+[TRAY YOLO] Loading YOLO model from E:\10-23\main_tray_vs\best.pt...
+[TRAY YOLO] Model loaded successfully: classes={0: 'upside_down'}
+[TRAY YOLO] Model loaded successfully: classes={0: 'upside_down'}
+[SCAN-YOLO] slot_1 occupied (90%), slot_2 occupied (89%), slot_3 occupied (91%), slot_4 occupied (92%), slot_5 free
 [INFO] Connected to RAPID server at 192.168.125.1:1025
 [SENT] Home
 [RECEIVED] Ask_next
@@ -13,53 +15,156 @@ Run 2D tray detection with YOLO or Normal Thresholding? Enter y (yolo) or t (thr
 [MODEL] blob: E:\10-23\main_tray_vs\blob_v5s\best.blob
 {'classes': 7, 'coordinates': 4, 'anchors': [10.0, 13.0, 16.0, 30.0, 33.0, 23.0, 30.0, 61.0, 62.0, 45.0, 59.0, 119.0, 116.0, 90.0, 156.0, 198.0, 373.0, 326.0], 'anchor_masks': {'side52': [0, 1, 2], 'side26': [3, 4, 5], 'side13': [6, 7, 8]}, 'iou_threshold': 0.5, 'confidence_threshold': 0.5}
 [DEPTH] mono=400P  ExtendedDisparity=True  Subpixel=False
-[MODEL] Raw YOLO output tensor detected for v5s -> using host-side YOLO11/v8 decoder + spatial depth calculator.
 [HT] active raw / HT_New_Run2_Mean. Y unchanged.
 [HT] x_compensate: y = 1.401822 * x - 198.521
 [HT] Z Heights: Upward=55.0 mm, Downward=45.0 mm
-Do you want to save the test protocol? (y/n): [REPORT] Logging all metrics to: Test_Protocols\Report_2026-11-13_14.53.32_v5s.txt
-[1944301011FF704800] [1.5] [0.991] [NeuralNetwork(4)] [warning] Number of inference threads assigned for network is 1, assigning 2 will likely yield in better performance
-[FRAME] 1/5 upside_down camera XYZ mm: -688.7, 181.8, 2769.9
-[FRAME] Target changed. 5-frame window restarted.
-[FRAME] 1/5 upside_down camera XYZ mm: -479.4, 127.2, 1925.4
-[FRAME] Target changed. 5-frame window restarted.
-[FRAME] 1/5 upside_down camera XYZ mm: -532.8, 141.4, 2139.8
-[FRAME] Target changed. 5-frame window restarted.
-[FRAME] 1/5 upside_down camera XYZ mm: -623.4, 165.4, 2511.2
-[FRAME] Target changed. 5-frame window restarted.
-[FRAME] 1/5 upside_down camera XYZ mm: -189.4, 50.3, 761.7
-[FRAME] Target changed. 5-frame window restarted.
-[FRAME] 1/5 upright camera XYZ mm: 86.7, -47.0, 472.9
-[FRAME] Target changed. 5-frame window restarted.
-[FRAME] 1/5 upright camera XYZ mm: -17.4, 2.6, 580.8
-[FRAME] Target changed. 5-frame window restarted.
-[FRAME] 1/5 upside_down camera XYZ mm: -158.0, 41.7, 642.6
-[FRAME] 2/5 upside_down camera XYZ mm: -157.2, 41.3, 643.1
-[FRAME] 3/5 upside_down camera XYZ mm: -156.1, 42.5, 641.0
-[FRAME] 4/5 upside_down camera XYZ mm: -156.3, 42.8, 640.0
+Do you want to save the test protocol? (y/n): [REPORT] Logging all metrics to: Test_Protocols\Report_2026-11-18_14.36.48_v5s.txt
+[1944301011FF704800] [1.5] [0.938] [SpatialDetectionNetwork(4)] [warning] Network compiled for 5 shaves, maximum available 12, compiling for 6 shaves likely will yield in better performance
+[FRAME] 1/5 Back camera XYZ mm: -25.2, -52.6, 500.8
+[FRAME] 2/5 Back camera XYZ mm: -25.2, -52.6, 500.8
+[FRAME] 3/5 Back camera XYZ mm: -25.2, -52.6, 500.8
+[FRAME] 4/5 Back camera XYZ mm: -25.2, -52.6, 500.8
 [FRAME] 5/5 ready. Automatic pick will send the median.
-[AUTO] Next mug from 5 frames (upside_down, 89%)
-[HT] median camera XYZ mm: -157.2, 42.5, 641.0
-[HT] 5-frame range mm: 1.9, 1.5, 4.5
-[HT] robot XYZ mm (compensated X, fixed Z=45.0): [489.48, 164.65, 45.0]
+[AUTO] Next mug from 5 frames (Back, 72%)
+[HT] median camera XYZ mm: -25.2, -52.6, 500.8
+[HT] 5-frame range mm: 1.5, 0.0, 0.0
+[HT] robot XYZ mm (compensated X, fixed Z=45.0): [359.51, 33.89, 45.0]
 [TRAY] Free slot set to: None
 [ROBOT] Starting PickUpSequence...
 [SENT] Pick_Up_Sequence
 [RECEIVED] Ask_Coordinate
-[SENT] [489.48, 164.65, 45.0]
-[RECEIVED] Ack_Coordinate
-[RECEIVED] Ask_MugNormal
-[SENT] [0.0, 0.0, -1.0]
-[SCAN-YOLO] slot_1 free (7%), slot_2 free (2%), slot_3 free (1%), slot_4 free (0%), slot_5 free (2%)
-[TRAY] Slot 'slot_1' reserved @ [600.0, -460.0, 162.0]  |  next free: slot_2
-[TRAY] Source=camera (YOLO)  slot 'slot_1' @ [600.0, -460.0, 162.0]
-[TRAY] Free slot set to: [600.0, -460.0, 162.0]
-[TRAY] FreeSlot stored: [600.0, -460.0, 162.0]
-[RECEIVED] Ask_Coordinate
-[RETRY #2] Grasp miss detected! Refreshing mug coordinates from live camera:
-         Previous: [489.48, 164.65, 45.0]
-         Fresh:    [330.34, 284.87, 45.0]
-[SENT] [330.34, 284.87, 45.0]
+[SENT] [359.51, 33.89, 45.0]
 [RECEIVED] Ack_Coordinate
 [RECEIVED] Ask_MugNormal
 [SENT] [0.999985426256925, -0.005398821515471368, 0.0]
+[SCAN-YOLO] slot_1 occupied (90%), slot_2 occupied (89%), slot_3 occupied (91%), slot_4 occupied (92%), slot_5 free
+[TRAY] Slot 'slot_5' reserved @ [279.0, -531.0, 160.0]  |  next free: None
+[TRAY] Source=camera (YOLO)  slot 'slot_5' @ [279.0, -531.0, 160.0]
+[TRAY] Free slot set to: [279.0, -531.0, 160.0]
+[TRAY] FreeSlot stored: [279.0, -531.0, 160.0]
+[RECEIVED] Ask_LeavePosition
+[DYNAMIC TRAY] Returning pre-cached slot coordinates: [279.0, -531.0, 160.0]
+[SENT] [279.0, -531.0, 160.0]
+[RECEIVED] Ack_LeavePosition
+[RECEIVED] Ask_next
+[ROBOT] PickUpSequence completed. Robot Cycle Time: 53.46 s
+[TRAY] Queued 'slot_5' for YOLO cup-placement verification (deadline in 5s).
+[TRAY] Free slot set to: None
+[FRAME] 1/5 left_side camera XYZ mm: -34.3, -70.8, 429.3
+[FRAME] 2/5 left_side camera XYZ mm: -38.1, -71.5, 429.3
+[FRAME] 3/5 left_side camera XYZ mm: -35.6, -70.8, 429.3
+[FRAME] 4/5 left_side camera XYZ mm: -37.6, -74.1, 423.2
+[FRAME] 5/5 ready. Automatic pick will send the median.
+[AUTO] Next mug from 5 frames (left_side, 89%)
+[HT] median camera XYZ mm: -37.6, -71.5, 429.3
+[HT] 5-frame range mm: 7.0, 3.2, 6.0
+[HT] robot XYZ mm (compensated X, fixed Z=45.0): [277.41, 46.73, 45.0]
+[TRAY] Free slot set to: None
+[SCAN-YOLO] slot_1 occupied (89%), slot_2 occupied (89%), slot_3 occupied (92%), slot_4 occupied (92%), slot_5 free
+[TRAY] No free slot available.
+[TRAY] ERROR: No placement slot available (yolo tray monitor).
+[TRAY] Free slot set to: None
+[FRAME] 1/5 left_side camera XYZ mm: -19.9, -62.0, 448.5
+[FRAME] 2/5 left_side camera XYZ mm: -18.6, -62.8, 448.5
+[FRAME] 3/5 left_side camera XYZ mm: -19.9, -62.0, 448.5
+[FRAME] 4/5 left_side camera XYZ mm: -19.9, -62.8, 448.5
+[FRAME] 5/5 ready. Automatic pick will send the median.
+[AUTO] Next mug from 5 frames (left_side, 91%)
+[HT] median camera XYZ mm: -19.9, -62.8, 448.5
+[HT] 5-frame range mm: 2.7, 0.7, 0.0
+[HT] robot XYZ mm (compensated X, fixed Z=45.0): [297.42, 28.92, 45.0]
+[TRAY] Free slot set to: None
+[SCAN-YOLO] slot_1 occupied (89%), slot_2 occupied (90%), slot_3 occupied (92%), slot_4 occupied (91%), slot_5 free
+[TRAY] No free slot available.
+[TRAY] ERROR: No placement slot available (yolo tray monitor).
+[TRAY] Free slot set to: None
+[FRAME] 1/5 left_side camera XYZ mm: -21.2, -62.0, 448.5
+[FRAME] 2/5 left_side camera XYZ mm: -21.2, -62.8, 448.5
+[FRAME] 3/5 left_side camera XYZ mm: -22.6, -61.3, 448.5
+[FRAME] 4/5 left_side camera XYZ mm: -22.9, -62.2, 455.3
+[FRAME] 5/5 ready. Automatic pick will send the median.
+[AUTO] Next mug from 5 frames (left_side, 82%)
+[HT] median camera XYZ mm: -22.6, -62.0, 448.5
+[HT] 5-frame range mm: 2.7, 1.5, 6.8
+[HT] robot XYZ mm (compensated X, fixed Z=45.0): [297.03, 31.57, 45.0]
+[TRAY] Free slot set to: None
+[SCAN-YOLO] slot_1 occupied (89%), slot_2 occupied (89%), slot_3 occupied (91%), slot_4 occupied (92%), slot_5 free
+[TRAY] No free slot available.
+[TRAY] ERROR: No placement slot available (yolo tray monitor).
+[TRAY] Free slot set to: None
+[FRAME] 1/5 left_side camera XYZ mm: -22.6, -61.3, 448.5
+[FRAME] 2/5 left_side camera XYZ mm: -22.6, -60.5, 448.5
+[FRAME] 3/5 left_side camera XYZ mm: -25.2, -60.5, 448.5
+[FRAME] 4/5 left_side camera XYZ mm: -26.6, -61.3, 448.5
+[FRAME] 5/5 ready. Automatic pick will send the median.
+[AUTO] Next mug from 5 frames (left_side, 91%)
+[HT] median camera XYZ mm: -25.2, -60.5, 448.5
+[HT] 5-frame range mm: 4.0, 3.0, 0.0
+[HT] robot XYZ mm (compensated X, fixed Z=45.0): [296.22, 34.22, 45.0]
+[TRAY] Free slot set to: None
+[SCAN-YOLO] slot_1 occupied (89%), slot_2 occupied (89%), slot_3 occupied (91%), slot_4 occupied (92%), slot_5 free
+[TRAY] No free slot available.
+[TRAY] ERROR: No placement slot available (yolo tray monitor).
+[TRAY] Free slot set to: None
+[FRAME] 1/5 left_side camera XYZ mm: -26.6, -58.3, 448.5
+[FRAME] 2/5 left_side camera XYZ mm: -27.9, -57.6, 448.5
+[FRAME] 3/5 left_side camera XYZ mm: -27.9, -57.6, 448.5
+[FRAME] 4/5 left_side camera XYZ mm: -27.9, -57.6, 448.5
+[FRAME] 5/5 ready. Automatic pick will send the median.
+[AUTO] Next mug from 5 frames (left_side, 82%)
+[HT] median camera XYZ mm: -27.9, -57.6, 448.5
+[HT] 5-frame range mm: 1.3, 0.7, 0.0
+[HT] robot XYZ mm (compensated X, fixed Z=45.0): [294.61, 36.86, 45.0]
+[TRAY] Free slot set to: None
+[SCAN-YOLO] slot_1 occupied (89%), slot_2 occupied (90%), slot_3 occupied (92%), slot_4 occupied (92%), slot_5 free
+[TRAY] No free slot available.
+[TRAY] ERROR: No placement slot available (yolo tray monitor).
+[TRAY] Free slot set to: None
+[FRAME] 1/5 left_side camera XYZ mm: -27.9, -57.6, 448.5
+[FRAME] 2/5 left_side camera XYZ mm: -27.9, -57.6, 448.5
+[FRAME] 3/5 left_side camera XYZ mm: -27.9, -57.6, 448.5
+[FRAME] 4/5 left_side camera XYZ mm: -27.9, -58.3, 448.5
+[FRAME] 5/5 ready. Automatic pick will send the median.
+[AUTO] Next mug from 5 frames (left_side, 82%)
+[HT] median camera XYZ mm: -27.9, -57.6, 448.5
+[HT] 5-frame range mm: 0.0, 0.7, 0.0
+[HT] robot XYZ mm (compensated X, fixed Z=45.0): [294.61, 36.86, 45.0]
+[TRAY] Free slot set to: None
+[SCAN-YOLO] slot_1 occupied (89%), slot_2 occupied (90%), slot_3 occupied (91%), slot_4 occupied (92%), slot_5 free
+[TRAY] No free slot available.
+[TRAY] ERROR: No placement slot available (yolo tray monitor).
+[TRAY] Free slot set to: None
+[FRAME] 1/5 left_side camera XYZ mm: -27.9, -58.3, 448.5
+[FRAME] 2/5 left_side camera XYZ mm: -27.9, -57.6, 448.5
+[FRAME] 3/5 left_side camera XYZ mm: -27.9, -57.6, 448.5
+[FRAME] 4/5 left_side camera XYZ mm: -26.6, -57.6, 448.5
+[FRAME] 5/5 ready. Automatic pick will send the median.
+[AUTO] Next mug from 5 frames (left_side, 83%)
+[HT] median camera XYZ mm: -27.9, -57.6, 448.5
+[HT] 5-frame range mm: 1.3, 0.7, 0.0
+[HT] robot XYZ mm (compensated X, fixed Z=45.0): [294.61, 36.86, 45.0]
+[TRAY] Free slot set to: None
+[SCAN-YOLO] slot_1 occupied (90%), slot_2 occupied (90%), slot_3 occupied (91%), slot_4 occupied (92%), slot_5 free
+[TRAY] [MISS] Cup not seen in 'slot_5' - slot freed for reuse. Rescanning all slots...
+[TRAY] Slot 'slot_5' reserved @ [279.0, -531.0, 160.0]  |  next free: None
+[TRAY] Source=camera (YOLO)  slot 'slot_5' @ [279.0, -531.0, 160.0]
+[TRAY] Free slot set to: [279.0, -531.0, 160.0]
+[TRAY] FreeSlot stored: [279.0, -531.0, 160.0]
+[ROBOT] Starting PickUpSequence...
+[SENT] Pick_Up_Sequence
+[RECEIVED] Ask_Coordinate
+[SENT] [294.61, 36.86, 45.0]
+[RECEIVED] Ack_Coordinate
+[RECEIVED] Ask_MugNormal
+[SENT] [-0.002597788746766537, -0.9999966257411208, 0.0]
+[SCAN-YOLO] slot_1 occupied (89%), slot_2 occupied (91%), slot_3 occupied (91%), slot_4 occupied (92%), slot_5 free
+[RECEIVED] Ask_LeavePosition
+[DYNAMIC TRAY] Returning pre-cached slot coordinates: [279.0, -531.0, 160.0]
+[SENT] [279.0, -531.0, 160.0]
+[RECEIVED] Ack_LeavePosition
+[RECEIVED] Ask_next
+[ROBOT] PickUpSequence completed. Robot Cycle Time: 70.10 s
+[TRAY] Queued 'slot_5' for YOLO cup-placement verification (deadline in 5s).
+[TRAY] Free slot set to: None
+[TRAY] [MISS] Cup not seen in 'slot_5' - slot freed for reuse. Rescanning all slots...
+[SCAN-YOLO] slot_1 occupied (90%), slot_2 occupied (91%), slot_3 occupied (92%), slot_4 occupied (93%), slot_5 free

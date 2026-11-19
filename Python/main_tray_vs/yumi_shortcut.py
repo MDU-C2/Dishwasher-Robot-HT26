@@ -44,11 +44,18 @@ if os.name == "nt" and PYTHON_EXE.lower().endswith("pythonw.exe"):
         PYTHON_EXE = _console_py
 
 # --- main_tray.py start-up prompts ---
-# Prompt 1 "Run detection model v5, v5s, v8, or v11Z?"    -> answered from the GUI dropdown
+# Prompt 1 "Run detection model v5, v5s, new5s, v8, v11Z, or v11n?" -> answered from the GUI dropdown
 # Prompt 2 "Run 2D tray detection with YOLO or Normal Thresholding?" -> answered from the 2D Tray mode dropdown
 # Prompt 3 "Do you want to save the test protocol? (y/n)" -> always SAVE_PROTOCOL_ANSWER
 # (Saving the protocol asks more questions later, which a hidden console cannot answer.)
-DETECTION_MODELS = {"v5": "5", "v5s": "5s", "v8": "8", "v11Z": "11"}   # GUI label -> typed answer
+DETECTION_MODELS = {
+    "v5": "5",
+    "v5s": "5s",
+    "v5s (new)": "new5s",
+    "v8": "8",
+    "v11Z": "11",
+    "v11n (new)": "11n",
+}   # GUI label -> typed answer
 DEFAULT_MODEL = "v5s" #v5s
 TRAY_MODES = {"YOLO": "yolo", "Threshold": "threshold"}                 # 2D Tray GUI label -> typed answer
 DEFAULT_TRAY_MODE = "YOLO"
@@ -539,7 +546,7 @@ class App:
         tk.Label(mrow, text="Detection model", font=("Segoe UI", 10), bg=PANEL, fg=MUTED).pack(side="left")
         self.model_var = tk.StringVar(value=DEFAULT_MODEL)
         self.model_combo = ttk.Combobox(mrow, textvariable=self.model_var, values=list(DETECTION_MODELS),
-                                        state="readonly", width=7, font=("Consolas", 11, "bold"))
+                                        state="readonly", width=10, font=("Consolas", 10, "bold"))
         self.model_combo.pack(side="right")
         trow = tk.Frame(c, bg=PANEL)
         trow.pack(fill="x", pady=2)

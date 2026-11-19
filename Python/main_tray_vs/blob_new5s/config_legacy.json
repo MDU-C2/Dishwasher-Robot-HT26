@@ -1,0 +1,70 @@
+{
+  "model": {
+    "blob": "best.blob"
+  },
+  "nn_config": {
+    "input_size": "416x416",
+    "NN_family": "YOLO",
+    "output_format": "detection",
+    "NN_specific_metadata": {
+      "classes": 6,
+      "coordinates": 4,
+      "anchors": [
+        10.0,
+        13.0,
+        16.0,
+        30.0,
+        33.0,
+        23.0,
+        30.0,
+        61.0,
+        62.0,
+        45.0,
+        59.0,
+        119.0,
+        116.0,
+        90.0,
+        156.0,
+        198.0,
+        373.0,
+        326.0
+      ],
+      "anchor_masks": {
+        "side52": [
+          0,
+          1,
+          2
+        ],
+        "side26": [
+          3,
+          4,
+          5
+        ],
+        "side13": [
+          6,
+          7,
+          8
+        ]
+      },
+      "iou_threshold": 0.5,
+      "confidence_threshold": 0.5
+    }
+  },
+  "mappings": {
+    "labels": [
+      "Back",
+      "Front",
+      "left_side",
+      "right_side",
+      "upright",
+      "upside_down"
+    ]
+  },
+  "version": 1,
+  "preprocessing": {
+    "input": "BGR888p U8 0..255",
+    "resize": "stretch 1080p to 416x416 in camera_setup.py",
+    "compiler_scale": 255,
+    "compiler_reverse_input_channels": true
+  }
+}
