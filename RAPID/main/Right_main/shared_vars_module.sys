@@ -26,7 +26,7 @@ MODULE shared_vars_module (SYSMODULE)
     
     PERS movement_vars shared_movement_left;
     PERS movement_vars shared_movement_right;
-    PERS bool cycleGripOutDone := FALSE;   !time
+    PERS bool cycleGripOutDone := TRUE;   !time
     
     CONST num flag_ERROR := -1;
     CONST num flag_nothing:=0;
@@ -47,5 +47,17 @@ MODULE shared_vars_module (SYSMODULE)
     CONST num calib_array_size := 40;
     PERS robtarget calib_robtargets_right{calib_array_size};
     PERS robtarget current_right_target;
+
+    FUNC string RobName()
+        VAR string tname;
+        tname := GetTaskName();
+        IF tname = "T_ROB_L" THEN
+            RETURN "ROB_L";
+        ELSEIF tname = "T_ROB_R" THEN
+            RETURN "ROB_R";
+        ELSE
+            RETURN tname;
+        ENDIF
+    ENDFUNC
     
 ENDMODULE

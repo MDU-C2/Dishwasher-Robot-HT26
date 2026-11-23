@@ -12,73 +12,33 @@ MODULE movementFunctions
 !***********************************************************
 
     PROC MovementProc(robtarget desired_target, num step_size, num max_magnitude, speeddata movement_speed)
-        
         VAR robtarget current_target;
         VAR robtarget disc_target;
-        VAR robtarget testtarget;
-        VAR jointtarget desired_joint_value;
-        VAR bool home;
-        VAR num testing := 0;
+        
         ConfJ\Off;
         ConfL\Off;
+
+        ! SPEED OPTIMIZATION: Try direct move first
+        IF checkJointValues(desired_target) THEN
+            MoveJ desired_target, movement_speed, z50, tGripper;
+            RETURN;
+        ENDIF
+
+        ! FALLBACK: Discretize if direct move hits joint limits
         current_target := CRobT(\Tool:=tGripper);
-        testtarget := desired_target;
-        
-        !Check if calculated joint values at robot target configuration is valid
-        desired_joint_value := CalcJointT(testtarget,tGripper);
-        
-        !Check distance between desired and current targets. Discretize pos & orientation if high distance.
         WHILE VectMagn(desired_target.trans-current_target.trans) > max_magnitude DO
             disc_target := discretizeTarget(current_target,desired_target,step_size);
-            desired_joint_value := CalcJointT(disc_target,tGripper);
             MoveJ disc_target,movement_speed,z50,tGripper;
             current_target := CRobT(\Tool:=tGripper);
         ENDWHILE
 
-        !Check if calculated joint values at robot target configuration is valid
-        desired_joint_value := CalcJointT(testtarget,tGripper);
-        
         MoveJ desired_target,movement_speed,fine,tGripper;
-!        ProcerrRecovery \SyncOrgMoveInst;
-        ConfJ\On;
-        ConfL\On;
-        ERROR
-        IF ERRNO = ERR_ROBLIMIT THEN !Joint values outside of working range
-            ResetRetryCount;
-
-            IF VectMagn(desired_target.trans-current_target.trans) > max_magnitude THEN
-                
-                disc_target := discretizeTarget(current_target,desired_target,step_size);
-                MoveJ disc_target,movement_speed,z50,tGripper;
-                current_target := CRobT(\Tool:=tGripper);
-
-                IF disc_target = home_target THEN
-                    home := TRUE;
-                ENDIF
-                
-                RETRY;
-                
-            ELSEIF NOT home THEN
-                
-                moveToHomeTarget;
-                current_target := CRobT(\Tool:=tGripper);
-                home := TRUE;
-                RETRY;
-            ELSE
-                
-                moveToHomeTarget;
-                TPWrite "Failed to reach target";
-
-                RETURN;
-            ENDIF
-        ELSEIF ERRNO = ERR_OUTSIDE_REACH THEN !Robot cannot reach to desired position
         
-            TPWrite "Outside of reach";
+    ERROR
+        IF ERRNO = ERR_ROBLIMIT THEN
+            TPWrite "Left Arm Reach Error - Target Unreachable";
+            moveToHomeTarget;
             RETURN;
-        ELSEIF ERRNO = ERR_PATH_STOP THEN !Only used if ProcerrRecovery \SyncOrgMoveInst; is active
-        
-            TPWrite "Movement stopped!";
-            TRYNEXT;
         ENDIF
     ENDPROC
     
@@ -211,8 +171,6 @@ MODULE movementFunctions
     ERROR
     IF ERRNO = ERR_ROBLIMIT THEN
         RETURN FALSE;
-    ELSEIF ERRNO = ERR_OUTSIDE_REACH THEN
-        RETURN FALSE;
     ENDIF
     ENDFUNC
     
@@ -227,7 +185,7 @@ MODULE movementFunctions
 !        MoveJ home_target,v300,fine,tGripper;
 !        MoveJ calib_home_target,v300,fine,tGripper;
 !        MoveJ home_target_v2,v300,fine,tGripper;
-        MoveJ home_target_v3,v300,fine,tGripper;
+        MoveJ home_target_v3,v800,z50,tGripper;
         
         ConfJ\Off;
     ENDPROC

@@ -23,9 +23,10 @@ MODULE movementFunctions
         MoveJ desired_target,movement_speed,fine,tGripper;
         
     ERROR
-        IF ERRNO = ERR_ROBLIMIT OR ERRNO = ERR_OUTSIDE_REACH THEN
+        IF ERRNO = ERR_ROBLIMIT THEN
+            TPWrite "Right Arm Reach Error - Target Unreachable";
             moveToHomeTarget;
-            RETRY;
+            RETURN;
         ENDIF
     ENDPROC
     
@@ -172,8 +173,6 @@ MODULE movementFunctions
         RETURN TRUE;
     ERROR
     IF ERRNO = ERR_ROBLIMIT THEN
-        RETURN FALSE;
-    ELSEIF ERRNO = ERR_OUTSIDE_REACH THEN
         RETURN FALSE;
     ENDIF
     ENDFUNC

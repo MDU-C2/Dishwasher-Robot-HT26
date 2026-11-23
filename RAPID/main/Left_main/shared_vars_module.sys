@@ -15,9 +15,6 @@ MODULE shared_vars_module (SYSMODULE)
         pos normal;
     ENDRECORD
     
-    
-   
-    
     !========== MOVEMENT ========== 
     RECORD movement_vars
       bool wait_flag;
@@ -29,7 +26,7 @@ MODULE shared_vars_module (SYSMODULE)
     
     PERS movement_vars shared_movement_left;
     PERS movement_vars shared_movement_right;
-    PERS bool cycleGripOutDone := FALSE;   !time
+    PERS bool cycleGripOutDone := TRUE;   !time
     
     CONST num flag_ERROR := -1;
     CONST num flag_nothing:=0;
@@ -46,15 +43,66 @@ MODULE shared_vars_module (SYSMODULE)
     CONST num flag_move_calibration_home := 11;
     CONST num flag_move_calibration_outofway := 12;
     
-    
     ! ========== CALIBRATION ========== 
     CONST num calib_array_size := 40;
     PERS robtarget calib_robtargets{calib_array_size};
     
-    Var num xval := 400;
-    Var num yval := 165;
+    VAR num xval := 350;
+    VAR num yval := 235;
     VAR num gripper_position := 0;
     CONST num grip_max := 15.7;
-    
+
+    ! Waypoints and dynamic entry points for MugManipulation
+    TASK PERS robtarget pSafeEntryLeftC := [[300, 266.77, 60],[0.697,0.716,0.04,0.02],[0,0,0,4],[-175,9E9,9E9,9E9,9E9,9E9]]; 
+    TASK PERS robtarget pSafeEntryLeft := [[324.542, 115.094, 324.892],[0.00012207,0.997286,-0.00128609,0.0736197],[0,0,0,4],[175.044,9E+09,9E+09,9E+09,9E+09,9E+09]]; 
+    CONST robtarget pSafeEntryNormalC := [[222, 350, 120],[0.466, 0.512,0.499,0.521],[0,0,0,4],[-175,9E9,9E9,9E9,9E9,9E9]]; 
+    TASK PERS robtarget pSafeEntryNormalV := [[409.605, 102.648, 64.541],[0.000211432, 0.988458,-0.00127445,0.151489],[-1,1,-1,4],[-174.572,9E+09,9E+09,9E+09,9E+09,9E+09]]; 
+    CONST robtarget pSafeEntryOvanC := [[484.94, 110, 180],[0.03575, 0.72068,-0.69169,0.03029],[0,0,0,4],[-175,9E9,9E9,9E9,9E9,9E9]]; 
+    VAR robtarget pSafeEntryOvanV2 := [[484.94, 110, 180],[0.03575, 0.72068,-0.69169,0.03029],[0,0,0,4],[-175,9E9,9E9,9E9,9E9,9E9]]; 
+    TASK PERS robtarget pSafeEntryOvanC2 := [[484.94, 110, 180],[0.03575, 0.72068,-0.69169,0.03029],[0,0,0,4],[-175,9E9,9E9,9E9,9E9,9E9]]; 
+
+    VAR clock cycleClock;
+
+    CONST pos sholder_pos_close := [110,200,460];
+    CONST pos sholder_pos_far := [1000,800,460];
+
+    ! Separate approach offsets for MugManipulation (tunable per approach)
+    VAR pos offset_normal := [5, -22, 0];
+    VAR pos offset_left   := [0, -25 , 0]; ![0, -30, 0];
+    VAR pos offset_center := [35, 0, 0];
+
+    ! ========== VERTICAL PICKUP TUNING (TASK PERS - live-tunable via RWS / FlexPendant) ==========
+    ! Robot-frame mug_normal from main_tray.py:
+    !   Back       -> [+1,  0,  0]  (mug_normal.x >  0.5)
+    !   Front      -> [-1,  0,  0]  (mug_normal.x < -0.5)
+    !   left_side  -> [ 0, -1,  0]  (mug_normal.y < -0.5)
+    !   right_side -> [ 0, +1,  0]  (mug_normal.y >  0.5)
+    ! Est. vertical target Z ~= vert_base_z - 20 + offset.z (+ vert_z_extra_90grad if y>215) + 0.95*vert_pullback + 10
+    TASK PERS pos offset_back         := [0, 0, 0];
+    TASK PERS pos offset_front        := [-20, 0, 0];
+    TASK PERS pos offset_left_side    := [0, 20, 0];
+    TASK PERS pos offset_right_side   := [0, 0, 0];
+    TASK PERS num vert_base_z         := 35;
+    TASK PERS num vert_z_extra_90grad := 35;
+    TASK PERS num vert_standoff_far   := 40;
+    TASK PERS num vert_standoff_close := 300;
+    TASK PERS num vert_pullback       := 10;
+    TASK PERS num vert_hold_force     := 4;
+
+    VAR num x_offset := 0;           
+    VAR num y_offset := 0;                
+    VAR num z_offset := 0; 
+
+    FUNC string RobName()
+        VAR string tname;
+        tname := GetTaskName();
+        IF tname = "T_ROB_L" THEN
+            RETURN "ROB_L";
+        ELSEIF tname = "T_ROB_R" THEN
+            RETURN "ROB_R";
+        ELSE
+            RETURN tname;
+        ENDIF
+    ENDFUNC
     
 ENDMODULE
