@@ -58,3 +58,17 @@ def zero_optical() -> str:
 def parse_line(line: str) -> tuple[str, list[str]]:
     parts = line.strip().split(",")
     return (parts[0].upper(), parts[1:]) if parts and parts[0] else ("", [])
+
+
+def set_lidar_config(enabled: bool, threshold_mm: int, rearm_mm: int = 50) -> str:
+    return f"LIDARCFG,{int(enabled)},{threshold_mm},{rearm_mm}\n"
+
+
+def set_slip_lidar_threshold(speed_threshold_mm_s: int) -> str:
+    """Set the LiDAR range-speed threshold used by slip detection."""
+    return f"SLIPCFG,{speed_threshold_mm_s}\n"
+
+
+def set_adaptive_grip(enabled: bool) -> str:
+    """Enable or disable adaptive tightening after an FSR-controlled grip."""
+    return f"ADAPTIVE,{int(enabled)}\n"
