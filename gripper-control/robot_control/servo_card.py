@@ -21,24 +21,20 @@ class ServoCard(QFrame):
         self.continuous = continuous
         self.setObjectName("ServoCard")
         self.setProperty("continuous", continuous)
-        self.setMinimumWidth(390)
+        self.setMinimumWidth(380)
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(20, 18, 20, 18)
-        outer.setSpacing(11)
+        outer.setContentsMargins(16, 14, 16, 14)
+        outer.setSpacing(10)
 
         meta_row = QHBoxLayout()
         meta_row.setSpacing(8)
-        channel_tag = QLabel(f"CH {channel:02d}")
+        channel_tag = QLabel(f"Ch {channel}, Pin {channel}")
         channel_tag.setObjectName("ChannelTag")
         meta_row.addWidget(channel_tag)
-
-        eyebrow = QLabel(f"PCA9685 · PIN {channel}")
-        eyebrow.setObjectName("Kicker")
-        meta_row.addWidget(eyebrow)
         meta_row.addStretch()
 
-        type_badge = QLabel("360° CONTINUOUS" if continuous else "180° POSITIONAL")
+        type_badge = QLabel("360° continuous" if continuous else "180° positional")
         type_badge.setObjectName("TypeBadgeCont" if continuous else "TypeBadgePos")
         meta_row.addWidget(type_badge)
         outer.addLayout(meta_row)
@@ -51,19 +47,18 @@ class ServoCard(QFrame):
         servo_name.setObjectName("ServoName")
         left.addWidget(servo_name)
         subtitle = QLabel(
-            "Hold button to run · Release to stop"
+            "Hold to drive, release stops"
             if continuous
-            else "Target angle control · 0° to 180°"
+            else "Target angle (0° to 180°)"
         )
         subtitle.setObjectName("Description")
         subtitle.setWordWrap(True)
         left.addWidget(subtitle)
-        top.addLayout(left)
-        top.addStretch()
+        top.addLayout(left, 1)
         self._command = DEFAULT_ANGLE
         self._fsr_state = 0
         self._fsr_limit = DEFAULT_FSR_GRIP_THRESHOLD
-        self.value_text = QLabel("STOP" if continuous else f"{DEFAULT_ANGLE:03d}°")
+        self.value_text = QLabel("Stop" if continuous else f"{DEFAULT_ANGLE}°")
         self.value_text.setObjectName("Angle")
         self.value_text.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         top.addWidget(self.value_text)
@@ -76,23 +71,22 @@ class ServoCard(QFrame):
         self.fsr_value_label = None
 
         if continuous:
-            outer.addSpacing(6)
-            instruction = QLabel("HOLD DIRECTION TO DRIVE · RELEASE OR PRESS STOP")
+            instruction = QLabel("Hold to drive")
             instruction.setObjectName("SmallCaps")
             outer.addWidget(instruction)
 
             direction_row = QHBoxLayout()
             direction_row.setSpacing(8)
-            self.reverse_button = QPushButton("⟲  HOLD REVERSE")
+            self.reverse_button = QPushButton("Hold Reverse")
             self.reverse_button.setObjectName("HoldReverse")
             self.reverse_button.setToolTip("Hold to rotate in reverse direction")
 
-            self.stop_button = QPushButton("■  STOP")
+            self.stop_button = QPushButton("Stop")
             self.stop_button.setObjectName("StopButton")
             self.stop_button.setToolTip("Stop this continuous servo immediately (90°)")
             self.stop_button.clicked.connect(lambda: self.set_angle(DEFAULT_ANGLE))
 
-            self.forward_button = QPushButton("⟳  HOLD FORWARD")
+            self.forward_button = QPushButton("Hold Forward")
             self.forward_button.setObjectName("HoldForward")
             self.forward_button.setToolTip("Hold to rotate in forward direction")
 
@@ -114,8 +108,8 @@ class ServoCard(QFrame):
 
             fsr_header = QHBoxLayout()
             fsr_header.setSpacing(8)
-            pin_name = FSR_PINS.get(channel, "ANALOG")
-            fsr_title = QLabel(f"FSR {pin_name} · FORCE TELEMETRY")
+            pin_name = FSR_PINS.get(channel, "Analog")
+            fsr_title = QLabel(f"FSR Force ({pin_name})")
             fsr_title.setObjectName("Kicker")
             fsr_header.addWidget(fsr_title)
             fsr_header.addStretch()
@@ -132,14 +126,13 @@ class ServoCard(QFrame):
             fsr_layout.addWidget(self.fsr_bar)
 
             self.fsr_value_label = QLabel(
-                f"Pressure: 0  (Raw: 0)  ·  Stop Limit: {DEFAULT_FSR_GRIP_THRESHOLD}"
+                f"Pressure: 0 / {DEFAULT_FSR_GRIP_THRESHOLD} (Raw: 0)"
             )
             self.fsr_value_label.setObjectName("Description")
             fsr_layout.addWidget(self.fsr_value_label)
             outer.addWidget(fsr_panel)
         else:
-            outer.addSpacing(4)
-            target_label = QLabel("COMMANDED TARGET ANGLE")
+            target_label = QLabel("Target angle")
             target_label.setObjectName("SmallCaps")
             outer.addWidget(target_label)
 
@@ -152,7 +145,7 @@ class ServoCard(QFrame):
             outer.addWidget(self.slider)
 
             ticks = QHBoxLayout()
-            tick_labels = ("0° (MIN)", "45°", "90° (CENTER)", "135°", "180° (MAX)")
+            tick_labels = ("0°", "45°", "90°", "135°", "180°")
             for idx, label in enumerate(tick_labels):
                 tick = QLabel(label)
                 tick.setObjectName("Tick")
@@ -169,13 +162,13 @@ class ServoCard(QFrame):
 
             nudge_row = QHBoxLayout()
             nudge_row.setSpacing(6)
-            target_input_label = QLabel("Set angle")
+            target_input_label = QLabel("Angle")
             target_input_label.setObjectName("Description")
             nudge_row.addWidget(target_input_label)
             self.spinbox = QSpinBox()
             self.spinbox.setRange(MIN_ANGLE, MAX_ANGLE)
-            self.spinbox.setSuffix(" °")
-            self.spinbox.setFixedWidth(96)
+            self.spinbox.setSuffix("°")
+            self.spinbox.setFixedWidth(82)
             self.spinbox.setValue(DEFAULT_ANGLE)
             nudge_row.addWidget(self.spinbox)
             nudge_row.addStretch()
@@ -192,7 +185,7 @@ class ServoCard(QFrame):
 
             presets_row = QHBoxLayout()
             presets_row.setSpacing(6)
-            quick_label = QLabel("Quick jump")
+            quick_label = QLabel("Presets")
             quick_label.setObjectName("Description")
             presets_row.addWidget(quick_label)
             presets_row.addStretch()
@@ -205,10 +198,9 @@ class ServoCard(QFrame):
 
             outer.addWidget(controls_box)
 
-        self.feedback = QLabel("Arduino not connected")
+        self.feedback = QLabel("Disconnected")
         self.feedback.setObjectName("Description")
-        self.feedback.setStyleSheet("color: #8B949E;")
-        outer.addSpacing(4)
+        self.feedback.setStyleSheet("color: #8A9099;")
         outer.addWidget(self.feedback)
 
         if not continuous:
@@ -239,14 +231,14 @@ class ServoCard(QFrame):
                 label = "reverse (slow)"
             else:
                 label = "forward (slow)"
-            self.feedback.setText(f"✓ Arduino confirmed: {label}")
+            self.feedback.setText(f"Confirmed: {label}")
         else:
-            self.feedback.setText(f"✓ Arduino accepted target: {angle}°")
-        self.feedback.setStyleSheet("color: #4ADE80;")
+            self.feedback.setText(f"Target confirmed: {angle}°")
+        self.feedback.setStyleSheet("color: #D8DCE2;")
 
     def set_offline(self) -> None:
-        self.feedback.setText("Arduino not connected")
-        self.feedback.setStyleSheet("color: #8B949E;")
+        self.feedback.setText("Disconnected")
+        self.feedback.setStyleSheet("color: #8A9099;")
 
     def update_fsr(self, net: int, raw: int, state: int, grip_limit: int) -> None:
         if not self.continuous or not self.fsr_bar or not self.fsr_state_badge or not self.fsr_value_label:
@@ -256,7 +248,7 @@ class ServoCard(QFrame):
         self.fsr_bar.setRange(0, safe_limit)
         self.fsr_bar.setValue(max(0, min(int(net), safe_limit)))
         self.fsr_value_label.setText(
-            f"Pressure: {net}  (Raw: {raw})  ·  Stop Limit: {safe_limit}"
+            f"Pressure: {net} / {safe_limit} (Raw: {raw})"
         )
         clamped_state = state if state in FSR_STATE_LABELS else 0
         if clamped_state != self._fsr_state:
@@ -281,7 +273,7 @@ class ServoCard(QFrame):
         self.spinbox.blockSignals(True)
         self.spinbox.setValue(value)
         self.spinbox.blockSignals(False)
-        self.value_text.setText(f"{value:03d}°")
+        self.value_text.setText(f"{value}°")
         self.changed.emit(self.channel, value)
 
     def _continuous_pressed(self, value: int) -> None:
@@ -292,15 +284,15 @@ class ServoCard(QFrame):
 
     def _update_continuous_display(self, value: int) -> None:
         if value == MIN_ANGLE:
-            self.value_text.setText("REVERSE")
+            self.value_text.setText("Reverse")
         elif value == MAX_ANGLE:
-            self.value_text.setText("FORWARD")
+            self.value_text.setText("Forward")
         elif value == DEFAULT_ANGLE:
-            self.value_text.setText("STOP")
+            self.value_text.setText("Stop")
         elif value < DEFAULT_ANGLE:
-            self.value_text.setText("REV SLOW")
+            self.value_text.setText("Rev slow")
         else:
-            self.value_text.setText("FWD SLOW")
+            self.value_text.setText("Fwd slow")
 
     def reset_continuous_state(self) -> None:
         """Reset the visual hold-button state without sending serial data."""

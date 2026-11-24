@@ -10,13 +10,14 @@ Desktop app for manual control and calibration of eight servos using an Arduino 
 - Connect the Arduino to the computer with a USB data cable.
 - Connect the 3 finger FSR sensors (Joy-It SEN-Pressure10) to analog pins `A0` (Finger 1), `A1` (Finger 2), and `A2` (Finger 3).
 - Connect the PAA5100JE optical flow sensor over SPI: `CS` → `D10`, `MOSI` → `D11`, `MISO` → `D12`, `SCK` → `D13`.
+- Connect the VL53L4CD palm LiDAR sensor to the UNO R4 WiFi Qwiic (`Wire1`) port.
 
 Channels 0–4 control positional servos. Channels 5–7 control continuous-rotation servos: hold **Reverse** or **Forward** to rotate and release to stop. A 90° command disables the PCA9685 output on continuous channels.
 
 ## Upload the firmware
 
 1. Open `firmware/GripperController/GripperController.ino` in Arduino IDE.
-2. Install **Adafruit PWM Servo Driver Library** and **Optical_Flow_Sensor** (`Optical_Flow_Sensors_Arduino`) through Library Manager / Arduino libraries.
+2. Install **Adafruit PWM Servo Driver Library**, **Optical_Flow_Sensor** (`Optical_Flow_Sensors_Arduino`), and **STM32duino VL53L4CD** (`vl53l4cd_class.h`) through Library Manager / Arduino libraries.
 3. Select **Arduino UNO R4 WiFi**, choose the correct port, and upload.
 4. Close Serial Monitor before connecting the desktop app.
 
@@ -33,8 +34,9 @@ Select the Arduino port and click **CONNECT**. The app sends a PING every second
 
 ## Tabs
 
-- **Servos:** channels 0–4 use a slider, numeric input, and quick positions. Channels 5–7 have hold-to-run direction buttons; releasing a button stops that servo. **Center all** moves the positional servos to 90° and stops the continuous servos.
-- **Calibration:** each channel has its own motion-profile toggle, maximum speed and acceleration settings, minimum/center/maximum pulse widths, point-by-point test buttons, and **Save / Apply** controls. Settings are saved on the computer and sent to the Arduino when the app connects.
+- **01 Simple Control:** operator-focused view with Grip/Release/Stop buttons, Auto-LiDAR Proximity Grip and Closed-Loop Force + Slip Regulation toggles, live LiDAR/Optical/FSR cards, saved arm presets (`Pose 1–3`), and simplified sliders for channels 0–4.
+- **02 Advanced Servos:** full per-channel cards for channels 0–4 (slider, numeric input, fine nudges) and channels 5–7 (hold-to-run direction buttons + live FSR meters). **Center all** moves the positional servos to 90° and stops the continuous servos.
+- **03 Calibration:** motion profiles, pulse widths, FSR thresholds, optical thresholds, and closed-loop LiDAR/slip regulator settings. Settings are saved on the computer and sent to the Arduino when the app connects.
 
 ## Per-servo motion profiles
 

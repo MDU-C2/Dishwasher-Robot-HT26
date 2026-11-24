@@ -55,6 +55,25 @@ def zero_optical() -> str:
     return "OPTZERO\n"
 
 
+def set_lidar_and_loop_config(
+    trigger_mm: int,
+    dwell_ms: int,
+    slip_vel_mm_s: int,
+    release_ms: int,
+    boost_step: int,
+    hold_deadband: int,
+    grip_timeout_ms: int = 4000,
+) -> str:
+    return (
+        f"LOOPCAL,{trigger_mm},{dwell_ms},{slip_vel_mm_s},"
+        f"{release_ms},{boost_step},{hold_deadband},{grip_timeout_ms}\n"
+    )
+
+
+def set_auto_modes(auto_lidar_grip: bool, closed_loop_hold: bool) -> str:
+    return f"AUTOMODE,{int(auto_lidar_grip)},{int(closed_loop_hold)}\n"
+
+
 def parse_line(line: str) -> tuple[str, list[str]]:
     parts = line.strip().split(",")
     return (parts[0].upper(), parts[1:]) if parts and parts[0] else ("", [])

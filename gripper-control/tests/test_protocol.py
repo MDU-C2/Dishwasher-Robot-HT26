@@ -1,9 +1,10 @@
 import unittest
 
 from robot_control.protocol import (
-    grip_command, parse_line, set_angle, set_calibration, set_fsr_calibration,
-    set_fsr_guard, set_motion_profile, set_optical_calibration, set_optical_led,
-    tare_fsr, zero_optical,
+    grip_command, parse_line, set_angle, set_auto_modes, set_calibration,
+    set_fsr_calibration, set_fsr_guard, set_lidar_and_loop_config,
+    set_motion_profile, set_optical_calibration, set_optical_led, tare_fsr,
+    zero_optical,
 )
 
 
@@ -43,6 +44,31 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(
             parse_line("OPT,-3,7,8,40,75,1\n"),
             ("OPT", ["-3", "7", "8", "40", "75", "1"]),
+        )
+
+    def test_lidar_and_closed_loop_commands(self):
+        self.assertEqual(
+            set_lidar_and_loop_config(60, 400, 40, 1200, 100, 60),
+            "LOOPCAL,60,400,40,1200,100,60,4000\n",
+        )
+        self.assertEqual(
+            set_lidar_and_loop_config(60, 400, 40, 1200, 100, 60, 4500),
+            "LOOPCAL,60,400,40,1200,100,60,4500\n",
+        )
+        self.assertEqual(set_auto_modes(True, True), "AUTOMODE,1,1\n")
+        self.assertEqual(set_auto_modes(False, True), "AUTOMODE,0,1\n")
+        self.assertEqual(grip_command("release"), "GRIP,RELEASE\n")
+        self.assertEqual(
+            parse_line("LIDAR,45,12,1,3,200\n"),
+            ("LIDAR", ["45", "12", "1", "3", "200"]),
+        )
+        self.assertEqual(
+            parse_line("LIDAR,65,-25,1,3,100\n"),
+            ("LIDAR", ["65", "-25", "1", "3", "100"]),
+        )
+        self.assertEqual(
+            parse_line("SLIP,100,3,1,1\n"),
+            ("SLIP", ["100", "3", "1", "1"]),
         )
 
     def test_empty_line(self):

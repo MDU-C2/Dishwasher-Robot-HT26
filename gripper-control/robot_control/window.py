@@ -1,45 +1,144 @@
-"""Brutalist PySide6 control panel for the dishwasher robot gripper."""
+"""PySide6 desktop controller for the dishwasher robot gripper."""
 
 from __future__ import annotations
 
+from collections import deque
 import time
 
 import serial.tools.list_ports
-from PySide6.QtCore import QSettings, QTimer, Qt
+from PySide6.QtCore import QPointF, QSettings, QTimer, Qt
+from PySide6.QtGui import QColor, QKeySequence, QPainter, QPainterPath, QPen, QShortcut
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QMainWindow,
-    QProgressBar, QPushButton, QScrollArea, QSpinBox, QTabWidget, QVBoxLayout, QWidget,
+    QAbstractSpinBox, QCheckBox, QComboBox, QDoubleSpinBox, QFrame, QGridLayout,
+    QHBoxLayout, QLabel, QLineEdit, QMainWindow, QProgressBar, QPushButton,
+    QScrollArea, QSlider, QSpinBox, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from .config import (
     APP_TITLE, CALIBRATION_STEP_US, COMMAND_INTERVAL_MS, CONTINUOUS_SERVO_CHANNELS,
     DEFAULT_ACCELERATION_DEG_S2, DEFAULT_ANGLE, DEFAULT_CALIBRATION_US,
-    DEFAULT_CONTINUOUS_CALIBRATION_US, DEFAULT_FSR_CONTACT_THRESHOLD,
-    DEFAULT_FSR_GRIP_THRESHOLD, DEFAULT_FSR_MAX_THRESHOLD, DEFAULT_MAX_SPEED_DEG_S,
-    DEFAULT_OPTICAL_MOTION_THRESHOLD, DEFAULT_OPTICAL_SQUAL_THRESHOLD,
-    FSR_PINS, FSR_STATE_LABELS, MAX_ACCELERATION_DEG_S2, MAX_FSR_THRESHOLD,
-    MAX_MAX_SPEED_DEG_S, MAX_ANGLE, MAX_OPTICAL_MOTION_THRESHOLD,
-    MAX_OPTICAL_SQUAL_THRESHOLD, MIN_ACCELERATION_DEG_S2, MIN_FSR_THRESHOLD,
-    MIN_MAX_SPEED_DEG_S, MIN_ANGLE, MIN_OPTICAL_MOTION_THRESHOLD,
-    MIN_OPTICAL_SQUAL_THRESHOLD, OPTICAL_SPI_PINS, OPTICAL_STATE_LABELS,
-    PULSE_MAX_ALLOWED_US, PULSE_MIN_ALLOWED_US, SERVO_CHANNELS,
+    DEFAULT_CONTINUOUS_CALIBRATION_US, DEFAULT_FORCE_HOLD_DEADBAND,
+    DEFAULT_FSR_CONTACT_THRESHOLD, DEFAULT_FSR_GRIP_THRESHOLD,
+    DEFAULT_FSR_MAX_THRESHOLD, DEFAULT_GRIP_TIMEOUT_MS, DEFAULT_LIDAR_DWELL_MS,
+    DEFAULT_LIDAR_SLIP_VELOCITY_MM_S, DEFAULT_LIDAR_TRIGGER_MM,
+    DEFAULT_MAX_SPEED_DEG_S, DEFAULT_OPTICAL_MOTION_THRESHOLD,
+    DEFAULT_OPTICAL_SQUAL_THRESHOLD, DEFAULT_RELEASE_DURATION_MS,
+    DEFAULT_SLIP_BOOST_STEP, FSR_PINS, FSR_STATE_LABELS,
+    GRIP_CONTROLLER_LABELS, LIDAR_I2C_BUS, LIDAR_STATE_LABELS,
+    MAX_ACCELERATION_DEG_S2, MAX_ANGLE, MAX_FORCE_HOLD_DEADBAND,
+    MAX_FSR_THRESHOLD, MAX_GRIP_TIMEOUT_MS, MAX_LIDAR_DWELL_MS,
+    MAX_LIDAR_SLIP_VELOCITY_MM_S, MAX_LIDAR_TRIGGER_MM, MAX_MAX_SPEED_DEG_S,
+    MAX_OPTICAL_MOTION_THRESHOLD, MAX_OPTICAL_SQUAL_THRESHOLD,
+    MAX_RELEASE_DURATION_MS, MAX_SLIP_BOOST_STEP, MIN_ACCELERATION_DEG_S2,
+    MIN_ANGLE, MIN_FORCE_HOLD_DEADBAND, MIN_FSR_THRESHOLD, MIN_GRIP_TIMEOUT_MS,
+    MIN_LIDAR_DWELL_MS, MIN_LIDAR_SLIP_VELOCITY_MM_S, MIN_LIDAR_TRIGGER_MM,
+    MIN_MAX_SPEED_DEG_S, MIN_OPTICAL_MOTION_THRESHOLD,
+    MIN_OPTICAL_SQUAL_THRESHOLD, MIN_RELEASE_DURATION_MS, MIN_SLIP_BOOST_STEP,
+    OPTICAL_SPI_PINS, OPTICAL_STATE_LABELS, PULSE_MAX_ALLOWED_US,
+    PULSE_MIN_ALLOWED_US, SERVO_CHANNELS, SLIP_STATE_LABELS,
 )
 from .calibration import ServoCalibration
 from .protocol import (
-    grip_command, parse_line, set_angle, set_calibration, set_fsr_calibration,
-    set_fsr_guard, set_motion_profile, set_optical_calibration, set_optical_led,
-    tare_fsr, zero_optical,
+    grip_command, parse_line, set_angle, set_auto_modes, set_calibration,
+    set_fsr_calibration, set_fsr_guard, set_lidar_and_loop_config,
+    set_motion_profile, set_optical_calibration, set_optical_led, tare_fsr,
+    zero_optical,
 )
 from .serial_worker import SerialWorker
 from .servo_card import ServoCard
+from .theme import TOKENS
+
+
+class DistanceHistoryWidget(QWidget):
+    """Compact rolling LiDAR distance plot (~12 s at 10 Hz)."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.samples: deque[int] = deque(maxlen=120)
+        self.setFixedHeight(56)
+        self.setToolTip(
+            "Recent VL53L4CD distance measurements (approximately 12 seconds of history)."
+        )
+
+    def add_sample(self, distance_mm: int) -> None:
+        self.samples.append(distance_mm)
+        self.update()
+
+    def clear(self) -> None:
+        self.samples.clear()
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.fillRect(self.rect(), QColor(TOKENS["paper_3"]))
+        painter.setPen(QPen(QColor(TOKENS["rule"]), 1))
+        painter.drawRect(self.rect().adjusted(0, 0, -1, -1))
+
+        area = self.rect().adjusted(40, 6, -8, -14)
+        if area.width() <= 1 or area.height() <= 1:
+            painter.end()
+            return
+
+        for i in range(3):
+            y = area.top() + (area.height() * i / 2.0)
+            painter.drawLine(QPointF(area.left(), y), QPointF(area.right(), y))
+
+        font = painter.font()
+        font.setPointSize(9)
+        painter.setFont(font)
+
+        if len(self.samples) < 2:
+            painter.setPen(QColor(TOKENS["muted"]))
+            painter.drawText(
+                self.rect(), Qt.AlignmentFlag.AlignCenter, "Waiting for distance samples"
+            )
+            painter.end()
+            return
+
+        low = min(self.samples)
+        high = max(self.samples)
+        if high - low < 50:
+            low = max(0, low - 25)
+            high = low + 50
+        else:
+            margin = max(10, int((high - low) * 0.08))
+            low = max(0, low - margin)
+            high += margin
+        span = max(1, high - low)
+
+        painter.setPen(QColor(TOKENS["muted"]))
+        painter.drawText(4, area.top() + 8, f"{high}")
+        painter.drawText(4, area.bottom() + 2, f"{low} mm")
+
+        path = QPainterPath()
+        count = len(self.samples)
+        for index, value in enumerate(self.samples):
+            x = area.left() + (area.width() * index / max(1, count - 1))
+            y = area.bottom() - ((value - low) / span) * area.height()
+            point = QPointF(x, y)
+            if index == 0:
+                path.moveTo(point)
+            else:
+                path.lineTo(point)
+        painter.setPen(QPen(QColor(TOKENS["cool"]), 1.8))
+        painter.drawPath(path)
+
+        painter.setPen(QColor(TOKENS["muted"]))
+        painter.drawText(
+            self.rect().adjusted(40, 0, -6, -2),
+            Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignRight,
+            "12s history -> now",
+        )
+        painter.end()
 
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(APP_TITLE)
-        self.resize(1220, 880)
-        self.setMinimumSize(900, 680)
+        self.resize(1280, 900)
+        self.setMinimumSize(940, 680)
         self.worker: SerialWorker | None = None
         self.arduino_ready = False
         self.pending: dict[int, int] = {}
@@ -62,8 +161,23 @@ class MainWindow(QMainWindow):
         self.fsr_cal_notes: dict[int, QLabel] = {}
         self._grip_sync_active = False
         self._opt_state = 3
+        self._lidar_state = 3
+        self._ctrl_state = 0
+        self._slip_force_boost = 0
+        self._slip_state = 0
+        self._slip_confidence = 0
+        self.simple_sliders: dict[int, QSlider] = {}
+        self.simple_angle_labels: dict[int, QLabel] = {}
+        self.simple_fsr_bars: dict[int, QProgressBar] = {}
+        self.simple_fsr_labels: dict[int, QLabel] = {}
+        self._cal_arm_widgets: list[QWidget] = []
+        self._cal_finger_widgets: list[QWidget] = []
+        self._cal_sensor_widgets: list[QWidget] = []
+        self._cal_filter_buttons: dict[str, QPushButton] = {}
+        self._shortcuts: list[QShortcut] = []
 
         self._build_ui()
+        self._setup_shortcuts()
         self.refresh_ports()
 
         self.send_timer = QTimer(self)
@@ -77,70 +191,54 @@ class MainWindow(QMainWindow):
         self.heartbeat_timer.start()
 
     def _build_ui(self) -> None:
-        scroll = QScrollArea()
-        scroll.setObjectName("AppScroll")
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.setCentralWidget(scroll)
-
         page = QWidget()
         page.setObjectName("Page")
-        scroll.setWidget(page)
+        self.setCentralWidget(page)
         content = QVBoxLayout(page)
-        content.setContentsMargins(28, 22, 28, 26)
-        content.setSpacing(16)
+        content.setContentsMargins(20, 14, 20, 14)
+        content.setSpacing(10)
 
-        masthead = QHBoxLayout()
-        heading = QVBoxLayout()
-        heading.setSpacing(2)
-        eyebrow = QLabel("MDU  /  DISHWASHER ROBOT  /  HT26")
-        eyebrow.setObjectName("Kicker")
-        heading.addWidget(eyebrow)
-        title = QLabel("GRIPPER CONTROL")
+        toolbar = QFrame()
+        toolbar.setObjectName("TopToolbar")
+        toolbar_layout = QVBoxLayout(toolbar)
+        toolbar_layout.setContentsMargins(16, 10, 16, 10)
+        toolbar_layout.setSpacing(4)
+
+        toolbar_row = QHBoxLayout()
+        toolbar_row.setSpacing(10)
+        title = QLabel("Gripper Control")
         title.setObjectName("Hero")
-        heading.addWidget(title)
-        subtitle = QLabel("MANUAL SERVO CONTROL  ·  ARDUINO UNO R4 WIFI + PCA9685")
-        subtitle.setObjectName("BodyMuted")
-        heading.addWidget(subtitle)
-        masthead.addLayout(heading)
-        masthead.addStretch(1)
-        self.status = QLabel("■ OFFLINE")
-        self.status.setObjectName("Off")
-        masthead.addWidget(self.status, alignment=Qt.AlignmentFlag.AlignTop)
-        content.addLayout(masthead)
+        toolbar_row.addWidget(title)
 
-        connection = QFrame()
-        connection.setObjectName("Panel")
-        connection_layout = QVBoxLayout(connection)
-        connection_layout.setContentsMargins(18, 14, 18, 14)
-        connection_layout.setSpacing(10)
-        label = QLabel("01  /  CONNECTION & SAFETY")
-        label.setObjectName("Kicker")
-        connection_layout.addWidget(label)
-        row = QHBoxLayout()
-        row.setSpacing(9)
+        self.status = QLabel("Offline")
+        self.status.setObjectName("Off")
+        toolbar_row.addWidget(self.status)
+        toolbar_row.addStretch(1)
+
         self.ports = QComboBox()
-        self.ports.setMinimumWidth(280)
-        row.addWidget(self.ports, 1)
-        self.refresh_button = QPushButton("REFRESH PORTS")
+        self.ports.setMinimumWidth(240)
+        toolbar_row.addWidget(self.ports)
+        self.refresh_button = QPushButton("Refresh")
         self.refresh_button.clicked.connect(self.refresh_ports)
-        row.addWidget(self.refresh_button)
-        self.connect_button = QPushButton("CONNECT")
-        self.connect_button.setObjectName("Primary")
-        self.connect_button.setMinimumWidth(130)
+        toolbar_row.addWidget(self.refresh_button)
+        self.connect_button = QPushButton("Connect")
+        self.connect_button.setObjectName("ConnectAction")
+        self.connect_button.setMinimumWidth(104)
         self.connect_button.clicked.connect(self._toggle_connection)
-        row.addWidget(self.connect_button)
-        global_center = QPushButton("CENTER / STOP ALL  ↺")
+        toolbar_row.addWidget(self.connect_button)
+        global_center = QPushButton("Stop / Center [Esc]")
+        global_center.setObjectName("Quick")
         global_center.setToolTip(
-            "Always available: moves all positional servos to 90° and stops all continuous servos"
+            "Stop all continuous finger servos and return positional servos to 90°"
         )
         global_center.clicked.connect(self._center_all)
-        row.addWidget(global_center)
-        connection_layout.addLayout(row)
-        self.connection_note = QLabel("SELECT A PORT AND CONNECT.")
+        toolbar_row.addWidget(global_center)
+        toolbar_layout.addLayout(toolbar_row)
+
+        self.connection_note = QLabel("Select a port and click Connect.")
         self.connection_note.setObjectName("Description")
-        connection_layout.addWidget(self.connection_note)
-        content.addWidget(connection)
+        toolbar_layout.addWidget(self.connection_note)
+        content.addWidget(toolbar)
 
         self.tabs = QTabWidget()
         self.tabs.setObjectName("MainTabs")
@@ -153,53 +251,55 @@ class MainWindow(QMainWindow):
             ch for ch in SERVO_CHANNELS if ch in CONTINUOUS_SERVO_CHANNELS
         ]
 
-        # Tab 01: Servos
+        # Tab: Advanced Servos (build cards before Simple Control binds to them)
         control_page = QWidget()
         control_layout = QVBoxLayout(control_page)
-        control_layout.setContentsMargins(6, 16, 6, 12)
-        control_layout.setSpacing(14)
+        control_layout.setContentsMargins(2, 10, 2, 10)
+        control_layout.setSpacing(12)
         section_row = QHBoxLayout()
-        section_title = QLabel("02  /  MANUAL SERVO CONTROL")
-        section_title.setObjectName("Kicker")
+        section_title = QLabel("Manual Servo Control")
+        section_title.setObjectName("SectionTitle")
         section_row.addWidget(section_title)
         section_row.addStretch(1)
-        center = QPushButton("CENTER ALL  ↺")
-        center.setToolTip("Moves all position servos to 90° and stops continuous servos")
+        center = QPushButton("Center All (90°)")
+        center.setObjectName("Quick")
+        center.setToolTip("Moves all positional servos to 90° and stops continuous servos")
         center.clicked.connect(self._center_all)
         section_row.addWidget(center)
         control_layout.addLayout(section_row)
 
         control_layout.addWidget(
             self._build_section_banner(
-                "POSITIONAL SERVOS  ·  0°–180° JOINT CONTROL",
-                f"{len(positional_channels)} channels · slider, fine nudge, and quick jumps",
+                "Positional Servos (0°–180°)",
+                f"{len(positional_channels)} channels, slider, fine nudge, and angle presets",
                 continuous=False,
             )
         )
         pos_grid = QGridLayout()
-        pos_grid.setHorizontalSpacing(14)
-        pos_grid.setVerticalSpacing(14)
+        pos_grid.setHorizontalSpacing(12)
+        pos_grid.setVerticalSpacing(12)
         pos_grid.setColumnStretch(0, 1)
         pos_grid.setColumnStretch(1, 1)
         for index, channel in enumerate(positional_channels):
             card = ServoCard(channel, SERVO_CHANNELS[channel], continuous=False)
             card.changed.connect(self._servo_changed)
+            card.changed.connect(self._sync_simple_slider)
             self.cards[channel] = card
             pos_grid.addWidget(card, index // 2, index % 2)
         control_layout.addLayout(pos_grid)
 
-        control_layout.addSpacing(6)
+        control_layout.addSpacing(4)
         control_layout.addWidget(
             self._build_section_banner(
-                "CONTINUOUS SERVOS  ·  FINGER DRIVES (HOLD TO RUN)",
-                f"{len(continuous_channels)} channels · hold Reverse/Forward to rotate, release or press Stop",
+                "Continuous Finger Drives (360°)",
+                f"{len(continuous_channels)} channels, hold Reverse or Forward to drive",
                 continuous=True,
             )
         )
         control_layout.addWidget(self._build_grip_master_panel())
         cont_grid = QGridLayout()
-        cont_grid.setHorizontalSpacing(14)
-        cont_grid.setVerticalSpacing(14)
+        cont_grid.setHorizontalSpacing(12)
+        cont_grid.setVerticalSpacing(12)
         cont_grid.setColumnStretch(0, 1)
         cont_grid.setColumnStretch(1, 1)
         for index, channel in enumerate(continuous_channels):
@@ -209,80 +309,142 @@ class MainWindow(QMainWindow):
             cont_grid.addWidget(card, index // 2, index % 2)
         control_layout.addLayout(cont_grid)
         control_layout.addStretch(1)
-        self.tabs.addTab(control_page, "01  SERVOS")
 
-        # Tab 02: Calibration
+        # Tab: Calibration (built before Simple Control reads saved thresholds)
         calibration_page = QWidget()
         calibration_layout = QVBoxLayout(calibration_page)
-        calibration_layout.setContentsMargins(6, 16, 6, 12)
-        calibration_layout.setSpacing(14)
+        calibration_layout.setContentsMargins(2, 10, 2, 10)
+        calibration_layout.setSpacing(12)
+
         cal_intro = QFrame()
         cal_intro.setObjectName("Panel")
         intro_layout = QVBoxLayout(cal_intro)
-        intro_layout.setContentsMargins(18, 14, 18, 14)
-        intro_layout.setSpacing(6)
-        intro_title = QLabel("03  /  SERVO CALIBRATION & MOTION PROFILES")
-        intro_title.setObjectName("Kicker")
-        intro_layout.addWidget(intro_title)
+        intro_layout.setContentsMargins(16, 12, 16, 12)
+        intro_layout.setSpacing(8)
+
+        cal_header_row = QHBoxLayout()
+        cal_header_row.setSpacing(8)
+        intro_title = QLabel("Calibration & Sensor Tuning")
+        intro_title.setObjectName("SectionTitle")
+        cal_header_row.addWidget(intro_title)
+        cal_header_row.addStretch(1)
+
+        filter_specs = (
+            ("all", "All"),
+            ("arm", "Arm Servos (0–4)"),
+            ("fingers", "Fingers && FSR (5–7)"),
+            ("sensors", "LiDAR && Optical"),
+        )
+        for key, label_text in filter_specs:
+            f_btn = QPushButton(label_text)
+            f_btn.setObjectName("FilterTab")
+            f_btn.setProperty("active", key == "all")
+            f_btn.clicked.connect(lambda checked=False, cat=key: self._set_calibration_filter(cat))
+            cal_header_row.addWidget(f_btn)
+            self._cal_filter_buttons[key] = f_btn
+        intro_layout.addLayout(cal_header_row)
+
         intro_text = QLabel(
-            "Adjust the pulse width and motion profile for each channel. Position servos use 0° / 90° / 180°. "
-            "Continuous servos use reverse / stop / forward. Save at stop and test one "
-            "point at a time without mechanical load."
+            "Adjust pulse limits (µs), speed ramps, FSR force thresholds, optical slip thresholds, "
+            "and closed-loop tuning. Save settings and test individual points without load."
         )
         intro_text.setObjectName("Description")
         intro_text.setWordWrap(True)
         intro_layout.addWidget(intro_text)
         calibration_layout.addWidget(cal_intro)
 
-        calibration_layout.addWidget(
+        arm_cal_section = QWidget()
+        arm_cal_layout = QVBoxLayout(arm_cal_section)
+        arm_cal_layout.setContentsMargins(0, 0, 0, 0)
+        arm_cal_layout.setSpacing(12)
+        arm_cal_layout.addWidget(
             self._build_section_banner(
-                "POSITIONAL SERVOS  ·  CALIBRATION & MOTION",
-                f"{len(positional_channels)} channels · 0° / 90° / 180° pulse mapping",
+                "Positional Servos Calibration",
+                f"{len(positional_channels)} channels, 0° / 90° / 180° pulse mapping",
                 continuous=False,
             )
         )
         pos_cal_grid = QGridLayout()
-        pos_cal_grid.setHorizontalSpacing(14)
-        pos_cal_grid.setVerticalSpacing(14)
+        pos_cal_grid.setHorizontalSpacing(12)
+        pos_cal_grid.setVerticalSpacing(12)
         pos_cal_grid.setColumnStretch(0, 1)
         pos_cal_grid.setColumnStretch(1, 1)
         for index, channel in enumerate(positional_channels):
             pos_cal_grid.addWidget(self._build_calibration_card(channel), index // 2, index % 2)
-        calibration_layout.addLayout(pos_cal_grid)
+        arm_cal_layout.addLayout(pos_cal_grid)
+        calibration_layout.addWidget(arm_cal_section)
+        self._cal_arm_widgets.append(arm_cal_section)
 
-        calibration_layout.addSpacing(6)
-        calibration_layout.addWidget(
+        finger_cal_section = QWidget()
+        finger_cal_layout = QVBoxLayout(finger_cal_section)
+        finger_cal_layout.setContentsMargins(0, 0, 0, 0)
+        finger_cal_layout.setSpacing(12)
+        finger_cal_layout.addWidget(
             self._build_section_banner(
-                "CONTINUOUS SERVOS  ·  FINGER DRIVES CALIBRATION & MOTION",
-                f"{len(continuous_channels)} channels · reverse / stop / forward pulse mapping",
+                "Finger Drives & FSR Calibration",
+                f"{len(continuous_channels)} channels, reverse / stop / forward and force limits",
                 continuous=True,
             )
         )
         cont_cal_grid = QGridLayout()
-        cont_cal_grid.setHorizontalSpacing(14)
-        cont_cal_grid.setVerticalSpacing(14)
+        cont_cal_grid.setHorizontalSpacing(12)
+        cont_cal_grid.setVerticalSpacing(12)
         cont_cal_grid.setColumnStretch(0, 1)
         cont_cal_grid.setColumnStretch(1, 1)
         for index, channel in enumerate(continuous_channels):
             cont_cal_grid.addWidget(self._build_calibration_card(channel), index // 2, index % 2)
-        calibration_layout.addLayout(cont_cal_grid)
+        finger_cal_layout.addLayout(cont_cal_grid)
+        calibration_layout.addWidget(finger_cal_section)
+        self._cal_finger_widgets.append(finger_cal_section)
 
-        calibration_layout.addSpacing(6)
-        calibration_layout.addWidget(
+        sensor_cal_section = QWidget()
+        sensor_cal_layout = QVBoxLayout(sensor_cal_section)
+        sensor_cal_layout.setContentsMargins(0, 0, 0, 0)
+        sensor_cal_layout.setSpacing(12)
+        sensor_cal_layout.addWidget(
             self._build_section_banner(
-                "OPTICAL SLIP SENSOR  ·  PAA5100JE CALIBRATION",
-                f"SPI {OPTICAL_SPI_PINS} · read-only movement detection thresholds",
+                "Optical Slip Sensor (PAA5100JE)",
+                f"SPI {OPTICAL_SPI_PINS}, movement detection thresholds",
                 continuous=True,
-                badge_text="SPI · READ-ONLY",
+                badge_text="SPI optical",
             )
         )
-        calibration_layout.addWidget(self._build_optical_calibration_card())
+        sensor_cal_layout.addWidget(self._build_optical_calibration_card())
+        sensor_cal_layout.addWidget(
+            self._build_section_banner(
+                "Palm LiDAR & Closed-Loop Regulator (VL53L4CD)",
+                f"{LIDAR_I2C_BUS}, proximity trigger, dwell, release and slip boost tuning",
+                continuous=True,
+                badge_text="I2C-1 regulator",
+            )
+        )
+        sensor_cal_layout.addWidget(self._build_lidar_loop_calibration_card())
+        calibration_layout.addWidget(sensor_cal_section)
+        self._cal_sensor_widgets.append(sensor_cal_section)
         calibration_layout.addStretch(1)
-        self.tabs.addTab(calibration_page, "02  CALIBRATION")
 
-        footer = QLabel("SERIAL 115200 BAUD  /  ANGLE IS COMMANDED, NOT MEASURED")
-        footer.setObjectName("SmallCaps")
+        # Tab 1: Simple Control
+        simple_page = self._build_simple_control_page(positional_channels, continuous_channels)
+
+        self.tabs.addTab(self._wrap_scroll(simple_page), "Simple Control")
+        self.tabs.addTab(self._wrap_scroll(control_page), "Advanced Servos")
+        self.tabs.addTab(self._wrap_scroll(calibration_page), "Calibration")
+
+        footer = QLabel(
+            "115200 baud   |   Space / Esc: Stop fingers   |   G: Grip   |   R: Release   |   T: Tare FSRs   |   1–3: Recall pose"
+        )
+        footer.setObjectName("Tick")
         content.addWidget(footer)
+
+    @staticmethod
+    def _wrap_scroll(inner: QWidget) -> QScrollArea:
+        inner.setObjectName("Page")
+        scroll = QScrollArea()
+        scroll.setObjectName("AppScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setWidget(inner)
+        return scroll
 
     @staticmethod
     def _build_section_banner(
@@ -295,31 +457,75 @@ class MainWindow(QMainWindow):
         banner.setObjectName("SectionBanner")
         banner.setProperty("continuous", continuous)
         layout = QHBoxLayout(banner)
-        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setContentsMargins(2, 6, 2, 8)
         layout.setSpacing(12)
         title_label = QLabel(title)
-        title_label.setObjectName("Kicker")
+        title_label.setObjectName("SectionTitle")
         layout.addWidget(title_label)
         subtitle_label = QLabel(subtitle)
         subtitle_label.setObjectName("Description")
         layout.addWidget(subtitle_label)
         layout.addStretch(1)
-        badge = QLabel(badge_text or ("360° CONTINUOUS" if continuous else "180° POSITIONAL"))
+        badge = QLabel(badge_text or ("360° continuous" if continuous else "180° positional"))
         badge.setObjectName("TypeBadgeCont" if continuous else "TypeBadgePos")
         layout.addWidget(badge)
         return banner
+
+    def _setup_shortcuts(self) -> None:
+        bindings: list[tuple[Qt.Key, object, bool]] = [
+            (Qt.Key.Key_Escape, self._stop_all_fingers, False),
+            (Qt.Key.Key_Space, self._stop_all_fingers, True),
+            (Qt.Key.Key_G, self._trigger_auto_grip, True),
+            (Qt.Key.Key_R, self._trigger_timed_release, True),
+            (Qt.Key.Key_T, self._tare_fsrs, True),
+            (Qt.Key.Key_1, lambda: self._apply_arm_pose(1), True),
+            (Qt.Key.Key_2, lambda: self._apply_arm_pose(2), True),
+            (Qt.Key.Key_3, lambda: self._apply_arm_pose(3), True),
+        ]
+        for key, callback, check_focus in bindings:
+            shortcut = QShortcut(QKeySequence(key), self)
+            shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+            if check_focus:
+                shortcut.activated.connect(
+                    lambda fn=callback: self._run_if_no_text_focus(fn)
+                )
+            else:
+                shortcut.activated.connect(callback)
+            self._shortcuts.append(shortcut)
+
+    def _run_if_no_text_focus(self, callback) -> None:
+        focused = self.focusWidget()
+        if isinstance(focused, (QAbstractSpinBox, QLineEdit)):
+            return
+        callback()
+
+    def _set_calibration_filter(self, category: str) -> None:
+        show_all = category == "all"
+        for widget in self._cal_arm_widgets:
+            widget.setVisible(show_all or category == "arm")
+        for widget in self._cal_finger_widgets:
+            widget.setVisible(show_all or category == "fingers")
+        for widget in self._cal_sensor_widgets:
+            widget.setVisible(show_all or category == "sensors")
+        for key, button in self._cal_filter_buttons.items():
+            button.setProperty("active", key == category)
+            self._repolish(button)
+
+    def _nudge_simple_servo(self, channel: int, delta: int) -> None:
+        if channel in self.cards:
+            self.cards[channel].set_angle(self.cards[channel].angle() + delta)
 
     def _build_grip_master_panel(self) -> QFrame:
         panel = QFrame()
         panel.setObjectName("GripMasterPanel")
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setContentsMargins(16, 12, 16, 12)
         layout.setSpacing(10)
 
         top = QHBoxLayout()
         top.setSpacing(10)
-        title = QLabel("MASTER 3-FINGER GRIP & FSR CONTROL")
-        title.setObjectName("Kicker")
+        title = QLabel("Master 3-Finger Grip & FSR Control")
+        title.setObjectName("SectionTitle")
         top.addWidget(title)
         top.addStretch(1)
 
@@ -333,7 +539,7 @@ class MainWindow(QMainWindow):
         self.fsr_guard_checkbox.toggled.connect(self._toggle_fsr_guard)
         top.addWidget(self.fsr_guard_checkbox)
 
-        tare_btn = QPushButton("ZERO / TARE FSRs (UNLOADED)")
+        tare_btn = QPushButton("Tare FSRs (Unloaded)")
         tare_btn.setObjectName("Quick")
         tare_btn.setToolTip("Set current unloaded FSR readings as zero baseline on all 3 fingers")
         tare_btn.clicked.connect(self._tare_fsrs)
@@ -342,7 +548,7 @@ class MainWindow(QMainWindow):
 
         actions = QHBoxLayout()
         actions.setSpacing(8)
-        auto_grip_btn = QPushButton("▶  AUTO-GRIP (CLOSE TO FSR LIMIT)")
+        auto_grip_btn = QPushButton("Auto-Grip to FSR Limit")
         auto_grip_btn.setObjectName("Primary")
         auto_grip_btn.setToolTip(
             "Closes all 3 fingers simultaneously, slows on contact, and stops each finger at its FSR limit"
@@ -350,14 +556,14 @@ class MainWindow(QMainWindow):
         auto_grip_btn.clicked.connect(self._trigger_auto_grip)
         actions.addWidget(auto_grip_btn, 2)
 
-        hold_open_btn = QPushButton("⟲  HOLD OPEN ALL 3")
+        hold_open_btn = QPushButton("Hold Open All")
         hold_open_btn.setObjectName("HoldReverse")
         hold_open_btn.setToolTip("Hold to open all 3 fingers simultaneously; release to stop")
         hold_open_btn.pressed.connect(lambda: self._grip_hold_action("OPEN_HOLD"))
         hold_open_btn.released.connect(lambda: self._grip_hold_action("STOP"))
         actions.addWidget(hold_open_btn, 2)
 
-        hold_close_btn = QPushButton("⟳  HOLD CLOSE ALL 3")
+        hold_close_btn = QPushButton("Hold Close All")
         hold_close_btn.setObjectName("HoldForward")
         hold_close_btn.setToolTip(
             "Hold to close all 3 fingers simultaneously (FSR auto-stop stops each finger at its limit)"
@@ -366,7 +572,7 @@ class MainWindow(QMainWindow):
         hold_close_btn.released.connect(lambda: self._grip_hold_action("STOP"))
         actions.addWidget(hold_close_btn, 2)
 
-        stop_btn = QPushButton("■  STOP FINGERS")
+        stop_btn = QPushButton("Stop Fingers")
         stop_btn.setObjectName("StopButton")
         stop_btn.setToolTip("Immediately stop all 3 continuous finger servos")
         stop_btn.clicked.connect(self._stop_all_fingers)
@@ -388,7 +594,7 @@ class MainWindow(QMainWindow):
 
         opt_header = QHBoxLayout()
         opt_header.setSpacing(8)
-        opt_title = QLabel("PAA5100JE OPTICAL FLOW · MOVEMENT MONITOR (READ-ONLY)")
+        opt_title = QLabel("PAA5100JE Optical Flow Monitor")
         opt_title.setObjectName("Kicker")
         opt_header.addWidget(opt_title)
         opt_header.addStretch(1)
@@ -403,7 +609,7 @@ class MainWindow(QMainWindow):
         self.opt_led_checkbox.toggled.connect(self._toggle_optical_led)
         opt_header.addWidget(self.opt_led_checkbox)
 
-        zero_opt_btn = QPushButton("ZERO TOTAL X/Y")
+        zero_opt_btn = QPushButton("Zero X/Y")
         zero_opt_btn.setObjectName("Quick")
         zero_opt_btn.setToolTip("Reset accumulated Total X and Total Y movement counters to zero")
         zero_opt_btn.clicked.connect(self._zero_optical)
@@ -446,6 +652,29 @@ class MainWindow(QMainWindow):
         self.opt_value_label.setObjectName("Description")
         self.opt_value_label.setWordWrap(True)
         opt_layout.addWidget(self.opt_value_label)
+
+        adv_slip_head = QHBoxLayout()
+        adv_slip_head.setSpacing(8)
+        adv_slip_title = QLabel("Slip Fusion (Opt + LiDAR + FSR)")
+        adv_slip_title.setObjectName("Kicker")
+        adv_slip_head.addWidget(adv_slip_title)
+        adv_slip_head.addStretch(1)
+        self.adv_slip_badge = QLabel(SLIP_STATE_LABELS[0])
+        self.adv_slip_badge.setObjectName("SlipState0")
+        adv_slip_head.addWidget(self.adv_slip_badge)
+        opt_layout.addLayout(adv_slip_head)
+
+        self.adv_slip_bar = QProgressBar()
+        self.adv_slip_bar.setRange(0, 100)
+        self.adv_slip_bar.setValue(0)
+        self.adv_slip_bar.setTextVisible(False)
+        self.adv_slip_bar.setProperty("slipState", "0")
+        opt_layout.addWidget(self.adv_slip_bar)
+
+        self.adv_slip_label = QLabel("Evidence: 0% (Opt: still, LiDAR: still)")
+        self.adv_slip_label.setObjectName("Description")
+        opt_layout.addWidget(self.adv_slip_label)
+
         layout.addWidget(opt_panel)
         return panel
 
@@ -462,11 +691,11 @@ class MainWindow(QMainWindow):
         tag = QLabel("SPI")
         tag.setObjectName("ChannelTag")
         header.addWidget(tag)
-        name = QLabel("PAA5100JE OPTICAL FLOW SENSOR")
+        name = QLabel("PAA5100JE Optical Flow Sensor")
         name.setObjectName("ServoName")
         header.addWidget(name)
         header.addStretch(1)
-        badge = QLabel("READ-ONLY MONITOR")
+        badge = QLabel("Optical Slip")
         badge.setObjectName("TypeBadgeCont")
         header.addWidget(badge)
         layout.addLayout(header)
@@ -476,7 +705,7 @@ class MainWindow(QMainWindow):
         sub_layout = QVBoxLayout(sub)
         sub_layout.setContentsMargins(10, 8, 10, 8)
         sub_layout.setSpacing(8)
-        kicker = QLabel("MOVEMENT ACTIVATION THRESHOLDS (NO MOTOR ACTION)")
+        kicker = QLabel("Movement Activation Thresholds (Triggers Closed-Loop Slip Boost)")
         kicker.setObjectName("Kicker")
         sub_layout.addWidget(kicker)
 
@@ -485,7 +714,7 @@ class MainWindow(QMainWindow):
 
         motion_col = QVBoxLayout()
         motion_col.setSpacing(4)
-        motion_lbl = QLabel("MOVEMENT THRESHOLD (MAGNITUDE)")
+        motion_lbl = QLabel("Movement Threshold (Mag)")
         motion_lbl.setObjectName("SmallCaps")
         motion_col.addWidget(motion_lbl)
         self.opt_motion_spin = QSpinBox()
@@ -505,7 +734,7 @@ class MainWindow(QMainWindow):
 
         squal_col = QVBoxLayout()
         squal_col.setSpacing(4)
-        squal_lbl = QLabel("MIN SURFACE QUALITY (SQUAL)")
+        squal_lbl = QLabel("Min Surface Quality (SQUAL)")
         squal_lbl.setObjectName("SmallCaps")
         squal_col.addWidget(squal_lbl)
         self.opt_squal_spin = QSpinBox()
@@ -528,11 +757,11 @@ class MainWindow(QMainWindow):
 
         actions = QHBoxLayout()
         actions.setSpacing(8)
-        reset_btn = QPushButton("RESET OPTICAL DEFAULTS")
+        reset_btn = QPushButton("Reset Optical Defaults")
         reset_btn.setObjectName("Quick")
         reset_btn.clicked.connect(self._reset_optical_defaults)
         actions.addWidget(reset_btn)
-        apply_btn = QPushButton("SAVE / APPLY OPTICAL")
+        apply_btn = QPushButton("Save / Apply Optical")
         apply_btn.setObjectName("Primary")
         apply_btn.clicked.connect(self._apply_optical_calibration)
         actions.addWidget(apply_btn)
@@ -546,6 +775,476 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.opt_cal_note)
         return panel
 
+    def _build_lidar_loop_calibration_card(self) -> QFrame:
+        panel = QFrame()
+        panel.setObjectName("CalibrationCard")
+        panel.setProperty("continuous", True)
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(10)
+
+        header = QHBoxLayout()
+        header.setSpacing(8)
+        tag = QLabel("I2C-1")
+        tag.setObjectName("ChannelTag")
+        header.addWidget(tag)
+        name = QLabel("Palm LiDAR & Closed-Loop Regulator")
+        name.setObjectName("ServoName")
+        header.addWidget(name)
+        header.addStretch(1)
+        badge = QLabel("VL53L4CD + Loop")
+        badge.setObjectName("TypeBadgeCont")
+        header.addWidget(badge)
+        layout.addLayout(header)
+
+        sub = QFrame()
+        sub.setObjectName("SubPanel")
+        sub_layout = QVBoxLayout(sub)
+        sub_layout.setContentsMargins(10, 8, 10, 8)
+        sub_layout.setSpacing(8)
+        kicker = QLabel("Proximity Auto-Grip, Timed Release & Slip Force Regulator")
+        kicker.setObjectName("Kicker")
+        sub_layout.addWidget(kicker)
+
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(8)
+
+        def _make_spin(
+            key: str,
+            default_val: int,
+            low_val: int,
+            high_val: int,
+            step: int,
+            suffix: str,
+            tooltip: str,
+        ) -> QSpinBox:
+            spin = QSpinBox()
+            spin.setRange(low_val, high_val)
+            spin.setSingleStep(step)
+            spin.setSuffix(suffix)
+            saved = self.settings.value(f"loop/{key}", default_val, type=int)
+            spin.setValue(max(low_val, min(high_val, saved)))
+            spin.setToolTip(tooltip)
+            return spin
+
+        self.loop_trigger_spin = _make_spin(
+            "trigger_mm", DEFAULT_LIDAR_TRIGGER_MM, MIN_LIDAR_TRIGGER_MM, MAX_LIDAR_TRIGGER_MM,
+            5, " mm", "Distance under which Palm LiDAR starts dwell timer for Auto-Grip",
+        )
+        self.loop_dwell_spin = _make_spin(
+            "dwell_ms", DEFAULT_LIDAR_DWELL_MS, MIN_LIDAR_DWELL_MS, MAX_LIDAR_DWELL_MS,
+            50, " ms", "How long an object must stay inside trigger distance before closing",
+        )
+        self.loop_slip_vel_spin = _make_spin(
+            "slip_vel_mm_s", DEFAULT_LIDAR_SLIP_VELOCITY_MM_S,
+            MIN_LIDAR_SLIP_VELOCITY_MM_S, MAX_LIDAR_SLIP_VELOCITY_MM_S,
+            5, " mm/s", "Minimum downward/away LiDAR speed while holding to flag vertical slip",
+        )
+        self.loop_release_spin = _make_spin(
+            "release_ms", DEFAULT_RELEASE_DURATION_MS, MIN_RELEASE_DURATION_MS, MAX_RELEASE_DURATION_MS,
+            100, " ms", "Duration for the timed Release Object open button",
+        )
+        self.loop_boost_spin = _make_spin(
+            "boost_step", DEFAULT_SLIP_BOOST_STEP, MIN_SLIP_BOOST_STEP, MAX_SLIP_BOOST_STEP,
+            25, " ADC", "Force setpoint increase added per detected slip event (capped by Max Safety Thr)",
+        )
+        self.loop_deadband_spin = _make_spin(
+            "hold_deadband", DEFAULT_FORCE_HOLD_DEADBAND, MIN_FORCE_HOLD_DEADBAND, MAX_FORCE_HOLD_DEADBAND,
+            10, " ADC", "Force drop hysteresis before a finger re-tightens during Closed-Loop Hold",
+        )
+
+        self.loop_grip_timeout_spin = QDoubleSpinBox()
+        self.loop_grip_timeout_spin.setRange(
+            MIN_GRIP_TIMEOUT_MS / 1000.0, MAX_GRIP_TIMEOUT_MS / 1000.0
+        )
+        self.loop_grip_timeout_spin.setDecimals(1)
+        self.loop_grip_timeout_spin.setSingleStep(0.5)
+        self.loop_grip_timeout_spin.setSuffix(" s")
+        saved_timeout_ms = self.settings.value(
+            "loop/grip_timeout_ms", DEFAULT_GRIP_TIMEOUT_MS, type=int
+        )
+        clamped_timeout_ms = max(MIN_GRIP_TIMEOUT_MS, min(MAX_GRIP_TIMEOUT_MS, saved_timeout_ms))
+        self.loop_grip_timeout_spin.setValue(clamped_timeout_ms / 1000.0)
+        self.loop_grip_timeout_spin.setToolTip(
+            "Maximum closing time in seconds before non-contacting fingers stop"
+        )
+        self.loop_grip_timeout_spin.valueChanged.connect(self._cal_grip_timeout_changed)
+
+        specs = (
+            ("Auto-Grip Distance", self.loop_trigger_spin),
+            ("Proximity Dwell", self.loop_dwell_spin),
+            ("LiDAR Slip Velocity", self.loop_slip_vel_spin),
+            ("Release Open Time", self.loop_release_spin),
+            ("Slip Force Boost", self.loop_boost_spin),
+            ("Force Hold Deadband", self.loop_deadband_spin),
+            ("Max Grip Time", self.loop_grip_timeout_spin),
+        )
+        for idx, (lbl_text, spin_box) in enumerate(specs):
+            col = QVBoxLayout()
+            col.setSpacing(4)
+            lbl = QLabel(lbl_text)
+            lbl.setObjectName("SmallCaps")
+            col.addWidget(lbl)
+            col.addWidget(spin_box)
+            grid.addLayout(col, idx // 3, idx % 3)
+        sub_layout.addLayout(grid)
+        layout.addWidget(sub)
+
+        actions = QHBoxLayout()
+        actions.setSpacing(8)
+        reset_btn = QPushButton("Reset Loop Defaults")
+        reset_btn.setObjectName("Quick")
+        reset_btn.clicked.connect(self._reset_loop_defaults)
+        actions.addWidget(reset_btn)
+        apply_btn = QPushButton("Save / Apply Loop")
+        apply_btn.setObjectName("Primary")
+        apply_btn.clicked.connect(self._apply_loop_calibration)
+        actions.addWidget(apply_btn)
+        layout.addLayout(actions)
+
+        self.lidar_cal_note = QLabel(
+            f"{LIDAR_I2C_BUS}: Connect Arduino to monitor live VL53L4CD distance and closed-loop status."
+        )
+        self.lidar_cal_note.setObjectName("Description")
+        self.lidar_cal_note.setWordWrap(True)
+        layout.addWidget(self.lidar_cal_note)
+        return panel
+
+    def _build_simple_control_page(
+        self, positional_channels: list[int], continuous_channels: list[int]
+    ) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(2, 8, 2, 8)
+        layout.setSpacing(10)
+
+        # 1. Smart Gripper Panel
+        smart_panel = QFrame()
+        smart_panel.setObjectName("GripMasterPanel")
+        smart_layout = QVBoxLayout(smart_panel)
+        smart_layout.setContentsMargins(16, 12, 16, 12)
+        smart_layout.setSpacing(10)
+
+        top = QHBoxLayout()
+        top.setSpacing(10)
+        title = QLabel("Smart Gripper")
+        title.setObjectName("SectionTitle")
+        top.addWidget(title)
+        subtitle = QLabel("Auto-proximity & closed-loop slip control")
+        subtitle.setObjectName("Description")
+        top.addWidget(subtitle)
+        top.addStretch(1)
+        tare_btn = QPushButton("Tare FSRs [T]")
+        tare_btn.setObjectName("Quick")
+        tare_btn.setToolTip("Set current unloaded FSR readings as zero baseline")
+        tare_btn.clicked.connect(self._tare_fsrs)
+        top.addWidget(tare_btn)
+        smart_layout.addLayout(top)
+
+        self.simple_ctrl_banner = QLabel(
+            f"{GRIP_CONTROLLER_LABELS[0]}   |   Force Boost: +0 ADC"
+        )
+        self.simple_ctrl_banner.setObjectName("CtrlStateBanner")
+        self.simple_ctrl_banner.setProperty("ctrlState", "0")
+        smart_layout.addWidget(self.simple_ctrl_banner)
+
+        toggles = QHBoxLayout()
+        toggles.setSpacing(20)
+        self.auto_lidar_checkbox = QCheckBox("Auto-Grip on Palm LiDAR Distance")
+        self.auto_lidar_checkbox.setToolTip(
+            "When armed, closes automatically after an object stays within trigger distance for dwell time"
+        )
+        self.auto_lidar_checkbox.setChecked(
+            self.settings.value("loop/auto_lidar", False, type=bool)
+        )
+        self.auto_lidar_checkbox.toggled.connect(self._toggle_auto_modes)
+        toggles.addWidget(self.auto_lidar_checkbox)
+
+        self.closed_loop_checkbox = QCheckBox(
+            "Closed-Loop Force Hold && Slip Control (FSR + Optical + LiDAR)"
+        )
+        self.closed_loop_checkbox.setToolTip(
+            "Maintains grip force if FSR pressure drops and boosts force if Optical or LiDAR detects slip"
+        )
+        self.closed_loop_checkbox.setChecked(
+            self.settings.value("loop/closed_loop_hold", True, type=bool)
+        )
+        self.closed_loop_checkbox.toggled.connect(self._toggle_auto_modes)
+        toggles.addWidget(self.closed_loop_checkbox)
+        toggles.addStretch(1)
+
+        timeout_lbl = QLabel("Max Grip Time")
+        timeout_lbl.setObjectName("SmallCaps")
+        toggles.addWidget(timeout_lbl)
+        self.simple_grip_timeout_spin = QDoubleSpinBox()
+        self.simple_grip_timeout_spin.setRange(
+            MIN_GRIP_TIMEOUT_MS / 1000.0, MAX_GRIP_TIMEOUT_MS / 1000.0
+        )
+        self.simple_grip_timeout_spin.setDecimals(1)
+        self.simple_grip_timeout_spin.setSingleStep(0.5)
+        self.simple_grip_timeout_spin.setSuffix(" s")
+        self.simple_grip_timeout_spin.setFixedWidth(84)
+        self.simple_grip_timeout_spin.setValue(self.loop_grip_timeout_spin.value())
+        self.simple_grip_timeout_spin.setToolTip(
+            "Maximum closing time in seconds before non-contacting fingers stop"
+        )
+        self.simple_grip_timeout_spin.valueChanged.connect(self._simple_grip_timeout_changed)
+        toggles.addWidget(self.simple_grip_timeout_spin)
+
+        smart_layout.addLayout(toggles)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
+        grip_btn = QPushButton("Grip Object [G]")
+        grip_btn.setObjectName("Primary")
+        grip_btn.setProperty("hero", True)
+        grip_btn.setFixedHeight(40)
+        grip_btn.clicked.connect(self._trigger_auto_grip)
+        btn_row.addWidget(grip_btn, 2)
+
+        release_btn = QPushButton("Release Object [R]")
+        release_btn.setObjectName("HoldReverse")
+        release_btn.setProperty("hero", True)
+        release_btn.setFixedHeight(40)
+        release_btn.setToolTip("Opens all 3 fingers for the configured release duration")
+        release_btn.clicked.connect(self._trigger_timed_release)
+        btn_row.addWidget(release_btn, 2)
+
+        hold_open_btn = QPushButton("Hold to Open")
+        hold_open_btn.setObjectName("HoldReverse")
+        hold_open_btn.setProperty("hero", True)
+        hold_open_btn.setFixedHeight(40)
+        hold_open_btn.setToolTip("Hold to manually open all 3 fingers; release to stop")
+        hold_open_btn.pressed.connect(lambda: self._grip_hold_action("OPEN_HOLD"))
+        hold_open_btn.released.connect(lambda: self._grip_hold_action("STOP"))
+        btn_row.addWidget(hold_open_btn, 1)
+
+        stop_btn = QPushButton("Stop Fingers [Space]")
+        stop_btn.setObjectName("StopButton")
+        stop_btn.setProperty("hero", True)
+        stop_btn.setFixedHeight(40)
+        stop_btn.clicked.connect(self._stop_all_fingers)
+        btn_row.addWidget(stop_btn, 1)
+        smart_layout.addLayout(btn_row)
+        layout.addWidget(smart_panel)
+
+        # 2. 3-Column Live Sensor Strip
+        sensor_row = QHBoxLayout()
+        sensor_row.setSpacing(10)
+
+        # Card 1: Palm LiDAR
+        lidar_card = QFrame()
+        lidar_card.setObjectName("Panel")
+        lidar_layout = QVBoxLayout(lidar_card)
+        lidar_layout.setContentsMargins(14, 10, 14, 10)
+        lidar_layout.setSpacing(5)
+        l_head = QHBoxLayout()
+        l_title = QLabel("Palm LiDAR (VL53L4CD)")
+        l_title.setObjectName("Kicker")
+        l_head.addWidget(l_title)
+        l_head.addStretch(1)
+        self.simple_lidar_badge = QLabel(LIDAR_STATE_LABELS[3])
+        self.simple_lidar_badge.setObjectName("LidarState3")
+        l_head.addWidget(self.simple_lidar_badge)
+        lidar_layout.addLayout(l_head)
+        self.simple_lidar_bar = QProgressBar()
+        self.simple_lidar_bar.setRange(0, 300)
+        self.simple_lidar_bar.setValue(0)
+        self.simple_lidar_bar.setTextVisible(False)
+        self.simple_lidar_bar.setProperty("lidarState", "3")
+        lidar_layout.addWidget(self.simple_lidar_bar)
+        self.simple_lidar_label = QLabel("Distance: -- mm, Vel: 0 mm/s")
+        self.simple_lidar_label.setObjectName("Description")
+        self.simple_lidar_label.setWordWrap(True)
+        lidar_layout.addWidget(self.simple_lidar_label)
+        self.simple_lidar_plot = DistanceHistoryWidget()
+        lidar_layout.addWidget(self.simple_lidar_plot)
+        sensor_row.addWidget(lidar_card, 1)
+
+        # Card 2: Slip Fusion + Optical Flow
+        opt_card = QFrame()
+        opt_card.setObjectName("Panel")
+        opt_layout = QVBoxLayout(opt_card)
+        opt_layout.setContentsMargins(14, 10, 14, 10)
+        opt_layout.setSpacing(4)
+
+        s_head = QHBoxLayout()
+        s_title = QLabel("Slip Fusion (Opt + LiDAR)")
+        s_title.setObjectName("Kicker")
+        s_head.addWidget(s_title)
+        s_head.addStretch(1)
+        self.simple_slip_badge = QLabel(SLIP_STATE_LABELS[0])
+        self.simple_slip_badge.setObjectName("SlipState0")
+        s_head.addWidget(self.simple_slip_badge)
+        opt_layout.addLayout(s_head)
+
+        self.simple_slip_bar = QProgressBar()
+        self.simple_slip_bar.setRange(0, 100)
+        self.simple_slip_bar.setValue(0)
+        self.simple_slip_bar.setTextVisible(False)
+        self.simple_slip_bar.setProperty("slipState", "0")
+        opt_layout.addWidget(self.simple_slip_bar)
+
+        self.simple_slip_label = QLabel("Evidence: 0% (Opt: still, LiDAR: still)")
+        self.simple_slip_label.setObjectName("Description")
+        self.simple_slip_label.setWordWrap(True)
+        opt_layout.addWidget(self.simple_slip_label)
+
+        o_head = QHBoxLayout()
+        o_title = QLabel("Optical (PAA5100JE)")
+        o_title.setObjectName("Kicker")
+        o_head.addWidget(o_title)
+        o_head.addStretch(1)
+        self.simple_opt_badge = QLabel(OPTICAL_STATE_LABELS[3])
+        self.simple_opt_badge.setObjectName("OptState3")
+        o_head.addWidget(self.simple_opt_badge)
+        s_zero_btn = QPushButton("Zero")
+        s_zero_btn.setObjectName("Quick")
+        s_zero_btn.clicked.connect(self._zero_optical)
+        o_head.addWidget(s_zero_btn)
+        opt_layout.addLayout(o_head)
+
+        self.simple_opt_bar = QProgressBar()
+        self.simple_opt_bar.setRange(0, max(1, self.opt_motion_spin.value()))
+        self.simple_opt_bar.setValue(0)
+        self.simple_opt_bar.setTextVisible(False)
+        self.simple_opt_bar.setProperty("optState", "3")
+        opt_layout.addWidget(self.simple_opt_bar)
+
+        self.simple_opt_label = QLabel("Mag: 0 (X: 0, Y: 0), Total: 0, 0")
+        self.simple_opt_label.setObjectName("Description")
+        self.simple_opt_label.setWordWrap(True)
+        opt_layout.addWidget(self.simple_opt_label)
+        opt_layout.addStretch(1)
+        sensor_row.addWidget(opt_card, 1)
+
+        # Card 3: 3-Finger Force Loop
+        fsr_card = QFrame()
+        fsr_card.setObjectName("Panel")
+        fsr_layout = QVBoxLayout(fsr_card)
+        fsr_layout.setContentsMargins(14, 10, 14, 10)
+        fsr_layout.setSpacing(6)
+        f_head = QHBoxLayout()
+        f_title = QLabel("Finger Force (FSR A0–A2)")
+        f_title.setObjectName("Kicker")
+        f_head.addWidget(f_title)
+        f_head.addStretch(1)
+        self.simple_boost_label = QLabel("Boost: +0")
+        self.simple_boost_label.setObjectName("SmallCaps")
+        f_head.addWidget(self.simple_boost_label)
+        fsr_layout.addLayout(f_head)
+
+        for ch in continuous_channels:
+            row = QHBoxLayout()
+            row.setSpacing(8)
+            lbl = QLabel(SERVO_CHANNELS[ch])
+            lbl.setObjectName("Description")
+            lbl.setFixedWidth(62)
+            row.addWidget(lbl)
+            bar = QProgressBar()
+            grip_limit = self.fsr_grip_spins[ch].value() if ch in self.fsr_grip_spins else DEFAULT_FSR_GRIP_THRESHOLD
+            bar.setRange(0, max(1, grip_limit))
+            bar.setValue(0)
+            bar.setTextVisible(False)
+            bar.setProperty("fsrState", "0")
+            row.addWidget(bar, 1)
+            val_lbl = QLabel(f"0 / {grip_limit}")
+            val_lbl.setObjectName("SmallCaps")
+            val_lbl.setFixedWidth(84)
+            val_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            row.addWidget(val_lbl)
+            self.simple_fsr_bars[ch] = bar
+            self.simple_fsr_labels[ch] = val_lbl
+            fsr_layout.addLayout(row)
+        fsr_layout.addStretch(1)
+        sensor_row.addWidget(fsr_card, 1)
+        layout.addLayout(sensor_row)
+
+        # 3. Simple Arm & Wrist Control + Saved Poses
+        arm_panel = QFrame()
+        arm_panel.setObjectName("Panel")
+        arm_layout = QVBoxLayout(arm_panel)
+        arm_layout.setContentsMargins(16, 12, 16, 12)
+        arm_layout.setSpacing(8)
+
+        arm_head = QHBoxLayout()
+        arm_head.setSpacing(8)
+        arm_title = QLabel("Arm & Wrist Position (Ch 0–4)")
+        arm_title.setObjectName("SectionTitle")
+        arm_head.addWidget(arm_title)
+        arm_head.addStretch(1)
+
+        home_btn = QPushButton("Home 90°")
+        home_btn.setObjectName("PoseButton")
+        home_btn.clicked.connect(self._center_all)
+        arm_head.addWidget(home_btn)
+
+        for pose_idx in (1, 2, 3):
+            p_btn = QPushButton(f"Pose {pose_idx} [{pose_idx}]")
+            p_btn.setObjectName("PoseButton")
+            p_btn.setToolTip(f"Load saved Pose {pose_idx} (Shortcut: {pose_idx})")
+            p_btn.clicked.connect(lambda checked=False, idx=pose_idx: self._apply_arm_pose(idx))
+            arm_head.addWidget(p_btn)
+            s_btn = QPushButton("Save")
+            s_btn.setObjectName("Quick")
+            s_btn.setToolTip(f"Save current channels 0–4 angles into Pose {pose_idx}")
+            s_btn.clicked.connect(lambda checked=False, idx=pose_idx: self._save_arm_pose(idx))
+            arm_head.addWidget(s_btn)
+        arm_layout.addLayout(arm_head)
+
+        self.pose_note = QLabel("Adjust sliders below or press 1–3 to recall saved poses.")
+        self.pose_note.setObjectName("Description")
+        arm_layout.addWidget(self.pose_note)
+
+        for ch in positional_channels:
+            s_row = QHBoxLayout()
+            s_row.setSpacing(8)
+            name_lbl = QLabel(SERVO_CHANNELS[ch])
+            name_lbl.setObjectName("Kicker")
+            name_lbl.setFixedWidth(74)
+            s_row.addWidget(name_lbl)
+
+            minus_btn = QPushButton("-5°")
+            minus_btn.setObjectName("Nudge")
+            minus_btn.setFixedWidth(40)
+            minus_btn.clicked.connect(
+                lambda checked=False, channel=ch: self._nudge_simple_servo(channel, -5)
+            )
+            s_row.addWidget(minus_btn)
+
+            slider = QSlider(Qt.Orientation.Horizontal)
+            slider.setRange(MIN_ANGLE, MAX_ANGLE)
+            slider.setSingleStep(1)
+            slider.setPageStep(10)
+            slider.setValue(self.cards[ch].angle() if ch in self.cards else DEFAULT_ANGLE)
+            slider.valueChanged.connect(
+                lambda val, channel=ch: self._simple_slider_changed(channel, val)
+            )
+            s_row.addWidget(slider, 1)
+
+            plus_btn = QPushButton("+5°")
+            plus_btn.setObjectName("Nudge")
+            plus_btn.setFixedWidth(40)
+            plus_btn.clicked.connect(
+                lambda checked=False, channel=ch: self._nudge_simple_servo(channel, 5)
+            )
+            s_row.addWidget(plus_btn)
+
+            ang_lbl = QLabel(f"{slider.value():03d}°")
+            ang_lbl.setObjectName("Angle")
+            ang_lbl.setFixedWidth(46)
+            ang_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            s_row.addWidget(ang_lbl)
+
+            self.simple_sliders[ch] = slider
+            self.simple_angle_labels[ch] = ang_lbl
+            arm_layout.addLayout(s_row)
+
+        layout.addWidget(arm_panel)
+        layout.addStretch(1)
+        return page
+
     def _build_calibration_card(self, channel: int) -> QFrame:
         continuous = channel in CONTINUOUS_SERVO_CHANNELS
         panel = QFrame()
@@ -557,14 +1256,14 @@ class MainWindow(QMainWindow):
 
         header = QHBoxLayout()
         header.setSpacing(8)
-        number = QLabel(f"CH {channel:02d}")
+        number = QLabel(f"Ch {channel}, Pin {channel}")
         number.setObjectName("ChannelTag")
         header.addWidget(number)
-        name = QLabel(SERVO_CHANNELS[channel].upper())
+        name = QLabel(SERVO_CHANNELS[channel])
         name.setObjectName("ServoName")
         header.addWidget(name)
         header.addStretch(1)
-        type_badge = QLabel("360° CONTINUOUS" if continuous else "180° POSITIONAL")
+        type_badge = QLabel("360° continuous" if continuous else "180° positional")
         type_badge.setObjectName("TypeBadgeCont" if continuous else "TypeBadgePos")
         header.addWidget(type_badge)
         layout.addLayout(header)
@@ -575,7 +1274,7 @@ class MainWindow(QMainWindow):
         motion_layout.setContentsMargins(10, 8, 10, 8)
         motion_layout.setSpacing(7)
         motion_header = QHBoxLayout()
-        motion_title = QLabel("MOTION PROFILE · THIS SERVO")
+        motion_title = QLabel("Motion Profile")
         motion_title.setObjectName("Kicker")
         motion_header.addWidget(motion_title)
         motion_header.addStretch(1)
@@ -629,7 +1328,7 @@ class MainWindow(QMainWindow):
         motion_fields.addStretch(1)
         motion_layout.addLayout(motion_fields)
 
-        apply_profile = QPushButton("APPLY THIS SERVO PROFILE")
+        apply_profile = QPushButton("Apply Motion Profile")
         apply_profile.setObjectName("Quick")
         apply_profile.clicked.connect(
             lambda checked=False, ch=channel: self._apply_motion_profile(ch)
@@ -675,7 +1374,7 @@ class MainWindow(QMainWindow):
         pulse_layout = QVBoxLayout(pulse_panel)
         pulse_layout.setContentsMargins(10, 8, 10, 8)
         pulse_layout.setSpacing(8)
-        pulse_kicker = QLabel("PULSE WIDTH MAPPING (µs)")
+        pulse_kicker = QLabel("Pulse Width Mapping (µs)")
         pulse_kicker.setObjectName("Kicker")
         pulse_layout.addWidget(pulse_kicker)
 
@@ -683,8 +1382,8 @@ class MainWindow(QMainWindow):
         row.setSpacing(8)
         groups: list[QSpinBox] = []
         point_names = (
-            ("REVERSE · MIN", "STOP · CENTER", "FORWARD · MAX")
-            if continuous else ("0° · MIN", "90° · CENTER", "180° · MAX")
+            ("Reverse (Min)", "Stop (Center)", "Forward (Max)")
+            if continuous else ("0° (Min)", "90° (Center)", "180° (Max)")
         )
         for value, point_name in zip(values, point_names):
             group = QVBoxLayout()
@@ -710,7 +1409,7 @@ class MainWindow(QMainWindow):
         tests.setSpacing(6)
         test_buttons: list[QPushButton] = []
         for angle, text in zip((MIN_ANGLE, DEFAULT_ANGLE, MAX_ANGLE), point_names):
-            button = QPushButton(f"TEST {text.split(' · ')[0]}")
+            button = QPushButton(f"Test {text.split(' ')[0]}")
             button.setObjectName("Quick")
             button.clicked.connect(
                 lambda checked=False, ch=channel, value=angle: self._test_calibration_point(ch, value)
@@ -723,24 +1422,24 @@ class MainWindow(QMainWindow):
 
         actions = QHBoxLayout()
         actions.setSpacing(8)
-        reset_btn = QPushButton("RESET DEFAULTS")
+        reset_btn = QPushButton("Reset Defaults")
         reset_btn.setObjectName("Quick")
         reset_btn.setToolTip("Restore factory default µs values into the fields above")
         reset_btn.clicked.connect(
             lambda checked=False, ch=channel: self._reset_calibration_defaults(ch)
         )
         actions.addWidget(reset_btn)
-        cancel = QPushButton("CANCEL / 90°")
+        cancel = QPushButton("Cancel / 90°")
         cancel.setObjectName("Quick")
         cancel.clicked.connect(lambda checked=False, ch=channel: self._cancel_calibration(ch))
         actions.addWidget(cancel)
-        save = QPushButton("SAVE / APPLY")
+        save = QPushButton("Save / Apply")
         save.setObjectName("Primary")
         save.clicked.connect(lambda checked=False, ch=channel: self._apply_calibration(ch))
         actions.addWidget(save)
         layout.addLayout(actions)
 
-        note = QLabel("START VALUES ARE A GUIDE. STOP IF THE SERVO BUZZES OR MEETS RESISTANCE.")
+        note = QLabel("Start values are a guide. Stop immediately if the servo buzzes or meets resistance.")
         note.setObjectName("Description")
         note.setWordWrap(True)
         self.cal_notes[channel] = note
@@ -760,8 +1459,8 @@ class MainWindow(QMainWindow):
 
         header = QHBoxLayout()
         header.setSpacing(8)
-        pin_name = FSR_PINS.get(channel, "ANALOG")
-        title = QLabel(f"FSR SENSOR ({pin_name}) · GRIP LIMIT")
+        pin_name = FSR_PINS.get(channel, "Analog")
+        title = QLabel(f"FSR Sensor ({pin_name}) Force Limits")
         title.setObjectName("Kicker")
         header.addWidget(title)
         header.addStretch(1)
@@ -779,9 +1478,9 @@ class MainWindow(QMainWindow):
         fields = QHBoxLayout()
         fields.setSpacing(8)
         specs = (
-            ("CONTACT THR", "contact", DEFAULT_FSR_CONTACT_THRESHOLD),
-            ("GRIP STOP THR", "grip", DEFAULT_FSR_GRIP_THRESHOLD),
-            ("MAX SAFETY THR", "max", DEFAULT_FSR_MAX_THRESHOLD),
+            ("Contact Thr", "contact", DEFAULT_FSR_CONTACT_THRESHOLD),
+            ("Grip Stop Thr", "grip", DEFAULT_FSR_GRIP_THRESHOLD),
+            ("Max Safety Thr", "max", DEFAULT_FSR_MAX_THRESHOLD),
         )
         boxes: list[QSpinBox] = []
         for label_text, key, default_val in specs:
@@ -805,7 +1504,7 @@ class MainWindow(QMainWindow):
         self.fsr_max_spins[channel] = boxes[2]
         self.fsr_invert_boxes[channel] = invert_box
 
-        apply_btn = QPushButton("APPLY FSR SETTINGS")
+        apply_btn = QPushButton("Apply FSR Settings")
         apply_btn.setObjectName("Quick")
         apply_btn.clicked.connect(
             lambda checked=False, ch=channel: self._apply_fsr_calibration(ch)
@@ -843,7 +1542,7 @@ class MainWindow(QMainWindow):
         for port in ports:
             self.ports.addItem(f"{port.device}  ·  {port.description}", port.device)
         if not ports:
-            self.ports.addItem("NO SERIAL PORT FOUND", None)
+            self.ports.addItem("No serial port found", None)
         if previous:
             index = self.ports.findData(previous)
             if index >= 0:
@@ -858,7 +1557,7 @@ class MainWindow(QMainWindow):
 
     def _toggle_connection(self) -> None:
         if self.worker is not None:
-            self.connection_note.setText("DISCONNECTING …")
+            self.connection_note.setText("Disconnecting…")
             self.connect_button.setEnabled(False)
             self.worker.stop(self._continuous_stop_commands())
             return
@@ -868,8 +1567,8 @@ class MainWindow(QMainWindow):
         self.arduino_ready = False
         self._last_error = ""
         self._reported_servo_count = None
-        self._set_status("Waiting", "■ CONNECTING")
-        self.connection_note.setText("OPENING PORT AND WAITING FOR ARDUINO …")
+        self._set_status("Waiting", "Connecting")
+        self.connection_note.setText("Opening port and waiting for Arduino…")
         self.connect_button.setEnabled(False)
         self.ports.setEnabled(False)
         self.refresh_button.setEnabled(False)
@@ -882,8 +1581,8 @@ class MainWindow(QMainWindow):
         self.worker.start()
 
     def _port_opened(self, port: str) -> None:
-        self.connection_note.setText(f"PORT OPEN: {port}  /  WAITING FOR READY …")
-        self.connect_button.setText("DISCONNECT")
+        self.connection_note.setText(f"Port open: {port}, waiting for READY…")
+        self.connect_button.setText("Disconnect")
         self.connect_button.setObjectName("Disconnect")
         self._repolish(self.connect_button)
         self.connect_button.setEnabled(True)
@@ -893,17 +1592,17 @@ class MainWindow(QMainWindow):
             return
         self.arduino_ready = True
         self._last_pong = time.monotonic()
-        self._set_status("Good", "■ CONNECTED")
+        self._set_status("Good", "Connected")
         if (
             self._reported_servo_count is not None
             and self._reported_servo_count != len(SERVO_CHANNELS)
         ):
             self.connection_note.setText(
-                f"WARNING: ARDUINO REPORTS {self._reported_servo_count} SERVOS, "
-                f"APP EXPECTS {len(SERVO_CHANNELS)}. RE-UPLOAD FIRMWARE."
+                f"Warning: Arduino reports {self._reported_servo_count} servos, "
+                f"app expects {len(SERVO_CHANNELS)}. Re-upload firmware."
             )
         else:
-            self.connection_note.setText("ARDUINO READY. SERVO CONTROLS ARE ACTIVE.")
+            self.connection_note.setText("Arduino ready. Servo and sensor telemetry active.")
         for channel in self.cards:
             low, center, high = self._calibration_values(channel)
             self.worker.send(set_calibration(channel, low, center, high))
@@ -933,6 +1632,23 @@ class MainWindow(QMainWindow):
             )
         )
         self.worker.send(set_optical_led(self.opt_led_checkbox.isChecked()))
+        self.worker.send(
+            set_lidar_and_loop_config(
+                self.loop_trigger_spin.value(),
+                self.loop_dwell_spin.value(),
+                self.loop_slip_vel_spin.value(),
+                self.loop_release_spin.value(),
+                self.loop_boost_spin.value(),
+                self.loop_deadband_spin.value(),
+                int(round(self.loop_grip_timeout_spin.value() * 1000)),
+            )
+        )
+        self.worker.send(
+            set_auto_modes(
+                self.auto_lidar_checkbox.isChecked(),
+                self.closed_loop_checkbox.isChecked(),
+            )
+        )
         self._flush_pending()
 
     def _apply_motion_profile(self, channel: int) -> None:
@@ -1067,6 +1783,7 @@ class MainWindow(QMainWindow):
     def _trigger_auto_grip(self) -> None:
         if not self.arduino_ready or not self.worker:
             self.grip_master_status.setText("CONNECT THE ARDUINO BEFORE STARTING AUTO-GRIP.")
+            self._set_ctrl_banner(0, 0, "CONNECT ARDUINO FIRST")
             return
         self._grip_sync_active = True
         for ch in CONTINUOUS_SERVO_CHANNELS:
@@ -1074,6 +1791,141 @@ class MainWindow(QMainWindow):
         self.worker.send(grip_command("START"))
         self.grip_master_status.setText(
             "AUTO-GRIP ACTIVE: Closing all 3 fingers until each FSR reaches its stop limit …"
+        )
+        self._set_ctrl_banner(2, self._slip_force_boost)
+
+    def _trigger_timed_release(self) -> None:
+        if not self.arduino_ready or not self.worker:
+            self.grip_master_status.setText("CONNECT THE ARDUINO BEFORE RELEASING.")
+            self._set_ctrl_banner(0, 0, "CONNECT ARDUINO FIRST")
+            return
+        self._grip_sync_active = True
+        for ch in CONTINUOUS_SERVO_CHANNELS:
+            self.pending.pop(ch, None)
+        self.worker.send(grip_command("RELEASE"))
+        self.grip_master_status.setText(
+            f"RELEASING OBJECT: Opening all 3 fingers for {self.loop_release_spin.value()} ms …"
+        )
+        self._set_ctrl_banner(4, 0)
+
+    def _toggle_auto_modes(self) -> None:
+        auto_lidar = self.auto_lidar_checkbox.isChecked()
+        closed_loop = self.closed_loop_checkbox.isChecked()
+        self.settings.setValue("loop/auto_lidar", auto_lidar)
+        self.settings.setValue("loop/closed_loop_hold", closed_loop)
+        self.settings.sync()
+        if self.arduino_ready and self.worker:
+            self.worker.send(set_auto_modes(auto_lidar, closed_loop))
+
+    def _cal_grip_timeout_changed(self, seconds: float) -> None:
+        self.simple_grip_timeout_spin.blockSignals(True)
+        self.simple_grip_timeout_spin.setValue(seconds)
+        self.simple_grip_timeout_spin.blockSignals(False)
+
+    def _simple_grip_timeout_changed(self, seconds: float) -> None:
+        self.loop_grip_timeout_spin.blockSignals(True)
+        self.loop_grip_timeout_spin.setValue(seconds)
+        self.loop_grip_timeout_spin.blockSignals(False)
+        self._apply_loop_calibration()
+
+    def _reset_loop_defaults(self) -> None:
+        self.loop_trigger_spin.setValue(DEFAULT_LIDAR_TRIGGER_MM)
+        self.loop_dwell_spin.setValue(DEFAULT_LIDAR_DWELL_MS)
+        self.loop_slip_vel_spin.setValue(DEFAULT_LIDAR_SLIP_VELOCITY_MM_S)
+        self.loop_release_spin.setValue(DEFAULT_RELEASE_DURATION_MS)
+        self.loop_boost_spin.setValue(DEFAULT_SLIP_BOOST_STEP)
+        self.loop_deadband_spin.setValue(DEFAULT_FORCE_HOLD_DEADBAND)
+        self.loop_grip_timeout_spin.setValue(DEFAULT_GRIP_TIMEOUT_MS / 1000.0)
+        self.lidar_cal_note.setText(
+            "LOOP DEFAULTS LOADED. CLICK SAVE / APPLY LOOP TO PERSIST."
+        )
+
+    def _apply_loop_calibration(self) -> None:
+        trig = self.loop_trigger_spin.value()
+        dwell = self.loop_dwell_spin.value()
+        slip_vel = self.loop_slip_vel_spin.value()
+        rel_ms = self.loop_release_spin.value()
+        boost = self.loop_boost_spin.value()
+        deadband = self.loop_deadband_spin.value()
+        grip_timeout_ms = int(round(self.loop_grip_timeout_spin.value() * 1000))
+        for key, val in (
+            ("trigger_mm", trig),
+            ("dwell_ms", dwell),
+            ("slip_vel_mm_s", slip_vel),
+            ("release_ms", rel_ms),
+            ("boost_step", boost),
+            ("hold_deadband", deadband),
+            ("grip_timeout_ms", grip_timeout_ms),
+        ):
+            self.settings.setValue(f"loop/{key}", val)
+        self.settings.sync()
+        if self.settings.status() != QSettings.Status.NoError:
+            self.lidar_cal_note.setText("COULD NOT SAVE LOOP SETTINGS.")
+            return
+        if self.arduino_ready and self.worker:
+            self.worker.send(
+                set_lidar_and_loop_config(
+                    trig, dwell, slip_vel, rel_ms, boost, deadband, grip_timeout_ms
+                )
+            )
+            self.lidar_cal_note.setText(
+                f"ACTIVE: Trigger ≤ {trig} mm ({dwell} ms), Slip ≥ {slip_vel} mm/s, "
+                f"Release {rel_ms} ms, Boost +{boost}, Deadband {deadband}, "
+                f"Timeout {grip_timeout_ms / 1000.0:.1f} s."
+            )
+        else:
+            self.lidar_cal_note.setText(
+                f"SAVED: Trigger ≤ {trig} mm ({dwell} ms), Slip ≥ {slip_vel} mm/s, "
+                f"Timeout {grip_timeout_ms / 1000.0:.1f} s. Sent on connect."
+            )
+
+    def _sync_simple_slider(self, channel: int, angle: int) -> None:
+        slider = self.simple_sliders.get(channel)
+        label = self.simple_angle_labels.get(channel)
+        if slider is None or label is None:
+            return
+        slider.blockSignals(True)
+        slider.setValue(angle)
+        slider.blockSignals(False)
+        label.setText(f"{angle:03d}°")
+
+    def _simple_slider_changed(self, channel: int, angle: int) -> None:
+        if channel in self.simple_angle_labels:
+            self.simple_angle_labels[channel].setText(f"{angle:03d}°")
+        if channel in self.cards:
+            self.cards[channel].set_angle(angle)
+
+    def _save_arm_pose(self, pose_idx: int) -> None:
+        positional = [ch for ch in SERVO_CHANNELS if ch not in CONTINUOUS_SERVO_CHANNELS]
+        angles = [str(self.cards[ch].angle()) for ch in positional if ch in self.cards]
+        self.settings.setValue(f"poses/pose_{pose_idx}", ",".join(angles))
+        self.settings.sync()
+        if self.settings.status() != QSettings.Status.NoError:
+            self.pose_note.setText(f"Could not save Pose {pose_idx}.")
+            return
+        self.pose_note.setText(f"Saved Pose {pose_idx}: {', '.join(a + '°' for a in angles)}")
+
+    def _apply_arm_pose(self, pose_idx: int) -> None:
+        raw = self.settings.value(f"poses/pose_{pose_idx}", "", type=str)
+        if not raw:
+            self.pose_note.setText(
+                f"Pose {pose_idx} is empty. Adjust sliders and click SAVE {pose_idx}."
+            )
+            return
+        positional = [ch for ch in SERVO_CHANNELS if ch not in CONTINUOUS_SERVO_CHANNELS]
+        try:
+            angles = [int(part) for part in raw.split(",")]
+        except ValueError:
+            self.pose_note.setText(f"Pose {pose_idx} is corrupted; save it again.")
+            return
+        if len(angles) != len(positional):
+            self.pose_note.setText(f"Pose {pose_idx} mismatch; save it again.")
+            return
+        for ch, angle in zip(positional, angles):
+            if ch in self.cards:
+                self.cards[ch].set_angle(angle)
+        self.pose_note.setText(
+            f"Loaded Pose {pose_idx}: {', '.join(f'{a}°' for a in angles)}"
         )
 
     def _grip_hold_action(self, action: str) -> None:
@@ -1098,6 +1950,7 @@ class MainWindow(QMainWindow):
 
     def _stop_all_fingers(self) -> None:
         self._grip_sync_active = False
+        self._set_ctrl_banner(0, 0)
         for ch in CONTINUOUS_SERVO_CHANNELS:
             self.pending.pop(ch, None)
             self.cards[ch].sync_continuous_state(DEFAULT_ANGLE)
@@ -1176,9 +2029,9 @@ class MainWindow(QMainWindow):
         motion_thr: int,
         squal_thr: int,
     ) -> str:
-        trigger = f"Mag ≥ {motion_thr}" + (f" & SQUAL ≥ {squal_thr}" if squal_thr > 0 else "")
+        trigger = f"Mag ≥ {motion_thr}" + (f", SQUAL ≥ {squal_thr}" if squal_thr > 0 else "")
         return (
-            f"X: {dx}  |  Y: {dy}  |  Mag: {mag}  |  Total X: {total_x}  |  Total Y: {total_y}  ·  "
+            f"X: {dx}  |  Y: {dy}  |  Mag: {mag}  |  Total: {total_x}, {total_y}  |  "
             f"Trigger: {trigger}"
         )
 
@@ -1200,15 +2053,102 @@ class MainWindow(QMainWindow):
         self.opt_value_label.setText(
             self._format_optical_readout(dx, dy, mag, total_x, total_y, motion_thr, squal_thr)
         )
+        self.simple_opt_bar.setRange(0, motion_thr)
+        self.simple_opt_bar.setValue(max(0, min(mag, motion_thr)))
+        if self.simple_opt_badge.objectName() != f"OptState{clamped_state}":
+            self.simple_opt_badge.setObjectName(f"OptState{clamped_state}")
+            self.simple_opt_badge.setText(OPTICAL_STATE_LABELS[clamped_state])
+            self._repolish(self.simple_opt_badge)
+            self.simple_opt_bar.setProperty("optState", str(clamped_state))
+            self._repolish(self.simple_opt_bar)
+        self.simple_opt_label.setText(
+            f"Mag: {mag} (X: {dx}, Y: {dy}), Total: {total_x}, {total_y}"
+        )
         if clamped_state == 3:
             self.opt_cal_note.setText(
-                f"SENSOR OFFLINE: Check PAA5100JE SPI wiring ({OPTICAL_SPI_PINS}) and power."
+                f"Sensor offline: check PAA5100JE SPI wiring ({OPTICAL_SPI_PINS}) and power."
             )
         else:
             self.opt_cal_note.setText(
-                f"Live PAA5100JE: {OPTICAL_STATE_LABELS[clamped_state]}  ·  "
-                f"X: {dx}  |  Y: {dy}  |  Mag: {mag}  |  Total X: {total_x}  |  Total Y: {total_y}"
+                f"Live PAA5100JE ({OPTICAL_STATE_LABELS[clamped_state]}): "
+                f"X {dx}, Y {dy}, Mag {mag}, Total {total_x}, {total_y}"
             )
+
+    def _set_ctrl_banner(
+        self, ctrl_state: int, slip_boost: int, extra_note: str | None = None
+    ) -> None:
+        clamped = ctrl_state if ctrl_state in GRIP_CONTROLLER_LABELS else 0
+        self._slip_force_boost = max(0, int(slip_boost))
+        if clamped != self._ctrl_state:
+            self._ctrl_state = clamped
+            self.simple_ctrl_banner.setProperty("ctrlState", str(clamped))
+            self._repolish(self.simple_ctrl_banner)
+        text = f"{GRIP_CONTROLLER_LABELS[clamped]}   |   Force Boost: +{self._slip_force_boost} ADC"
+        if extra_note:
+            text = f"{text}   |   {extra_note}"
+        self.simple_ctrl_banner.setText(text)
+        self.simple_boost_label.setText(f"Boost: +{self._slip_force_boost}")
+
+    def _update_slip_display(
+        self, confidence: int, state: int, optical_active: bool, lidar_active: bool
+    ) -> None:
+        clamped_conf = max(0, min(100, int(confidence)))
+        clamped_state = state if state in SLIP_STATE_LABELS else 0
+        self._slip_confidence = clamped_conf
+        self._slip_state = clamped_state
+
+        opt_txt = "moving" if optical_active else "still"
+        lidar_txt = "moving" if lidar_active else "still"
+        label_text = SLIP_STATE_LABELS[clamped_state]
+        summary_text = f"Evidence: {clamped_conf}% (Opt: {opt_txt}, LiDAR: {lidar_txt})"
+
+        for badge, bar, lbl in (
+            (self.simple_slip_badge, self.simple_slip_bar, self.simple_slip_label),
+            (self.adv_slip_badge, self.adv_slip_bar, self.adv_slip_label),
+        ):
+            bar.setValue(clamped_conf)
+            if badge.objectName() != f"SlipState{clamped_state}":
+                badge.setObjectName(f"SlipState{clamped_state}")
+                badge.setText(label_text)
+                self._repolish(badge)
+                bar.setProperty("slipState", str(clamped_state))
+                self._repolish(bar)
+            lbl.setText(summary_text)
+
+    def _update_lidar_and_loop_display(
+        self, dist_mm: int, vel_mm_s: int, lidar_state: int, ctrl_state: int, slip_boost: int
+    ) -> None:
+        clamped_lidar = lidar_state if lidar_state in LIDAR_STATE_LABELS else 3
+        self.simple_lidar_bar.setRange(0, 300)
+        if clamped_lidar == 3 or dist_mm <= 0:
+            self.simple_lidar_bar.setValue(0)
+            dist_text = "--"
+        else:
+            self.simple_lidar_bar.setValue(max(0, 300 - min(dist_mm, 300)))
+            dist_text = str(dist_mm)
+            self.simple_lidar_plot.add_sample(dist_mm)
+        if clamped_lidar != self._lidar_state:
+            self._lidar_state = clamped_lidar
+            self.simple_lidar_badge.setObjectName(f"LidarState{clamped_lidar}")
+            self.simple_lidar_badge.setText(LIDAR_STATE_LABELS[clamped_lidar])
+            self._repolish(self.simple_lidar_badge)
+            self.simple_lidar_bar.setProperty("lidarState", str(clamped_lidar))
+            self._repolish(self.simple_lidar_bar)
+        vel_text = f"{vel_mm_s:+d}" if vel_mm_s != 0 else "0"
+        self.simple_lidar_label.setText(
+            f"Distance: {dist_text} mm, Vel: {vel_text} mm/s "
+            f"(Trigger ≤ {self.loop_trigger_spin.value()} mm)"
+        )
+        if clamped_lidar == 3:
+            self.lidar_cal_note.setText(
+                f"{LIDAR_I2C_BUS} offline: check VL53L4CD Qwiic connection and power."
+            )
+        else:
+            self.lidar_cal_note.setText(
+                f"Live VL53L4CD: {dist_text} mm, Vel {vel_text} mm/s, "
+                f"{LIDAR_STATE_LABELS[clamped_lidar]}, Loop: {GRIP_CONTROLLER_LABELS.get(ctrl_state, 'IDLE')}"
+            )
+        self._set_ctrl_banner(ctrl_state, slip_boost)
 
     def _test_calibration_point(self, channel: int, angle: int) -> None:
         if not self.arduino_ready or not self.worker:
@@ -1248,8 +2188,8 @@ class MainWindow(QMainWindow):
             self._last_pong = time.monotonic()
             if self.worker and self.arduino_ready and self.status.objectName() == "Bad":
                 self.arduino_ready = True
-                self._set_status("Good", "■ CONNECTED")
-                self.connection_note.setText("ARDUINO IS RESPONDING AGAIN.")
+                self._set_status("Good", "Connected")
+                self.connection_note.setText("Arduino is responding again.")
             return
         kind, values = parse_line(message)
         if kind == "ACK" and len(values) == 2:
@@ -1270,11 +2210,22 @@ class MainWindow(QMainWindow):
                 return
             nets, raws, states = parsed[:3], parsed[3:6], parsed[6:9]
             for finger_index, ch in enumerate(CONTINUOUS_SERVO_CHANNELS):
-                grip_limit = self.fsr_grip_spins[ch].value() if ch in self.fsr_grip_spins else DEFAULT_FSR_GRIP_THRESHOLD
+                base_grip = self.fsr_grip_spins[ch].value() if ch in self.fsr_grip_spins else DEFAULT_FSR_GRIP_THRESHOLD
+                max_thr = self.fsr_max_spins[ch].value() if ch in self.fsr_max_spins else DEFAULT_FSR_MAX_THRESHOLD
+                active_limit = min(max_thr, base_grip + self._slip_force_boost)
                 if ch in self.cards:
                     self.cards[ch].update_fsr(
-                        nets[finger_index], raws[finger_index], states[finger_index], grip_limit
+                        nets[finger_index], raws[finger_index], states[finger_index], active_limit
                     )
+                if ch in self.simple_fsr_bars and ch in self.simple_fsr_labels:
+                    bar = self.simple_fsr_bars[ch]
+                    bar.setRange(0, max(1, active_limit))
+                    bar.setValue(max(0, min(nets[finger_index], active_limit)))
+                    f_state = states[finger_index] if states[finger_index] in FSR_STATE_LABELS else 0
+                    if bar.property("fsrState") != str(f_state):
+                        bar.setProperty("fsrState", str(f_state))
+                        self._repolish(bar)
+                    self.simple_fsr_labels[ch].setText(f"{nets[finger_index]} / {active_limit}")
                 if ch in self.fsr_cal_notes:
                     pin = FSR_PINS.get(ch, "FSR")
                     label = FSR_STATE_LABELS.get(states[finger_index], "UNKNOWN")
@@ -1308,18 +2259,51 @@ class MainWindow(QMainWindow):
             state = values[0]
             if state == "DONE":
                 self._grip_sync_active = False
+                self._set_ctrl_banner(0, 0)
                 self.grip_master_status.setText(
                     "AUTO-GRIP COMPLETE: All 3 fingers stopped at their FSR grip limits."
                 )
+            elif state == "HOLDING":
+                self._grip_sync_active = True
+                self._set_ctrl_banner(3, self._slip_force_boost)
+                self.grip_master_status.setText(
+                    "CLOSED-LOOP HOLDING: Maintaining FSR force and monitoring Optical + LiDAR slip."
+                )
+            elif state == "DWELL":
+                self._set_ctrl_banner(1, 0)
+                self.grip_master_status.setText(
+                    "PALM LiDAR OBJECT DETECTED: Confirming dwell before closing …"
+                )
+            elif state == "IDLE":
+                self._grip_sync_active = False
+                self._set_ctrl_banner(0, 0)
+                self.grip_master_status.setText("CONTROLLER IDLE / READY.")
+            elif state == "RELEASING":
+                self._grip_sync_active = True
+                self._set_ctrl_banner(4, 0)
+                self.grip_master_status.setText("TIMED RELEASE: Opening all 3 fingers …")
+            elif state == "RELEASED":
+                self._grip_sync_active = False
+                self._set_ctrl_banner(0, 0, "RELEASED")
+                for ch in CONTINUOUS_SERVO_CHANNELS:
+                    if ch in self.cards:
+                        self.cards[ch].sync_continuous_state(DEFAULT_ANGLE)
+                self.grip_master_status.setText(
+                    "OBJECT RELEASED. Move object clear of palm LiDAR to re-arm auto-grip."
+                )
             elif state == "TIMEOUT":
                 self._grip_sync_active = False
+                self._set_ctrl_banner(0, 0, "TIMEOUT")
                 self.grip_master_status.setText(
-                    "AUTO-GRIP TIMEOUT (6s): Stopped fingers that did not reach target pressure."
+                    f"AUTO-GRIP TIMEOUT ({self.loop_grip_timeout_spin.value():.1f}s): "
+                    "Stopped fingers without full FSR contact."
                 )
             elif state == "STOPPED":
                 self._grip_sync_active = False
+                self._set_ctrl_banner(0, 0)
                 self.grip_master_status.setText("ALL 3 FINGERS STOPPED.")
             elif state == "CLOSING":
+                self._set_ctrl_banner(2, self._slip_force_boost)
                 self.grip_master_status.setText(
                     "AUTO-GRIP CLOSING: Slowing on contact, stopping at FSR grip limits …"
                 )
@@ -1327,6 +2311,54 @@ class MainWindow(QMainWindow):
                 self.grip_master_status.setText("CLOSING ALL 3 FINGERS (FSR guard active) …")
             elif state == "OPEN_HOLD":
                 self.grip_master_status.setText("OPENING ALL 3 FINGERS …")
+        elif kind == "LIDAR" and len(values) == 5:
+            try:
+                dist_mm, vel_mm_s, lidar_state, ctrl_state, slip_boost = map(int, values)
+            except ValueError:
+                return
+            self._update_lidar_and_loop_display(
+                dist_mm, vel_mm_s, lidar_state, ctrl_state, slip_boost
+            )
+        elif kind == "SLIP" and len(values) == 4:
+            try:
+                confidence, slip_state, opt_flag, lidar_flag = map(int, values)
+            except ValueError:
+                return
+            self._update_slip_display(
+                confidence, slip_state, bool(opt_flag), bool(lidar_flag)
+            )
+        elif kind == "SLIP" and len(values) == 2:
+            source = values[0]
+            try:
+                boost = int(values[1])
+            except ValueError:
+                return
+            self._set_ctrl_banner(3, boost, f"SLIP ({source})!")
+            self.grip_master_status.setText(
+                f"SLIP DETECTED ({source}): Force target boosted +{boost} ADC."
+            )
+        elif kind == "ACKLOOPCAL" and len(values) in (6, 7):
+            try:
+                trig, dwell, vel, rel_ms, boost, deadband = map(int, values[:6])
+                timeout_ms = (
+                    int(values[6])
+                    if len(values) == 7
+                    else int(round(self.loop_grip_timeout_spin.value() * 1000))
+                )
+            except ValueError:
+                return
+            self.lidar_cal_note.setText(
+                f"ARDUINO CONFIRMED LOOP: Trigger ≤ {trig} mm ({dwell} ms), Slip ≥ {vel} mm/s, "
+                f"Release {rel_ms} ms, Boost +{boost}, Deadband {deadband}, "
+                f"Timeout {timeout_ms / 1000.0:.1f} s."
+            )
+        elif kind == "ACKAUTOMODE" and len(values) == 2:
+            auto_lidar = values[0] == "1"
+            closed_loop = values[1] == "1"
+            self.lidar_cal_note.setText(
+                f"ARDUINO CONFIRMED MODES: Auto-LiDAR {'ON' if auto_lidar else 'OFF'}, "
+                f"Closed-Loop Hold {'ON' if closed_loop else 'OFF'}."
+            )
         elif kind == "GRIPSTOP" and len(values) == 2:
             try:
                 finger, net = map(int, values)
@@ -1386,16 +2418,16 @@ class MainWindow(QMainWindow):
             self._reported_servo_count = reported_count
             if reported_count != len(SERVO_CHANNELS):
                 self.connection_note.setText(
-                    f"WARNING: ARDUINO REPORTS {reported_count} SERVOS, "
-                    f"APP EXPECTS {len(SERVO_CHANNELS)}. RE-UPLOAD FIRMWARE."
+                    f"Warning: Arduino reports {reported_count} servos, "
+                    f"app expects {len(SERVO_CHANNELS)}. Re-upload firmware."
                 )
         elif kind == "ERR":
-            self.connection_note.setText(f"ARDUINO: {','.join(values)}")
+            self.connection_note.setText(f"Arduino: {','.join(values)}")
 
     def _failed(self, reason: str) -> None:
         self._last_error = reason
-        self.connection_note.setText(f"CONNECTION ERROR: {reason}")
-        self._set_status("Bad", "■ ERROR")
+        self.connection_note.setText(f"Connection error: {reason}")
+        self._set_status("Bad", "Error")
 
     def _worker_finished(self) -> None:
         self.arduino_ready = False
@@ -1407,18 +2439,32 @@ class MainWindow(QMainWindow):
         for ch, note in self.fsr_cal_notes.items():
             note.setText(f"Live {FSR_PINS.get(ch, 'FSR')}: waiting for Arduino connection …")
         self._update_optical_display(0, 0, 0, 0, 0, 3)
+        self._update_lidar_and_loop_display(0, 0, 3, 0, 0)
+        self._update_slip_display(0, 0, False, False)
+        self.simple_lidar_plot.clear()
+        for ch in CONTINUOUS_SERVO_CHANNELS:
+            if ch in self.simple_fsr_bars and ch in self.simple_fsr_labels:
+                grip_limit = self.fsr_grip_spins[ch].value() if ch in self.fsr_grip_spins else DEFAULT_FSR_GRIP_THRESHOLD
+                self.simple_fsr_bars[ch].setRange(0, max(1, grip_limit))
+                self.simple_fsr_bars[ch].setValue(0)
+                self.simple_fsr_bars[ch].setProperty("fsrState", "0")
+                self._repolish(self.simple_fsr_bars[ch])
+                self.simple_fsr_labels[ch].setText(f"0 / {grip_limit}")
         self.opt_cal_note.setText(
             f"SPI pins: {OPTICAL_SPI_PINS}. Connect Arduino and move a surface 15–35 mm below the lens to tune."
+        )
+        self.lidar_cal_note.setText(
+            f"{LIDAR_I2C_BUS}: Connect Arduino to monitor live VL53L4CD distance and closed-loop status."
         )
         self.grip_master_status.setText(
             "Connect Arduino to control all 3 fingers together with live FSR pressure limits."
         )
         self._set_status("Bad" if self._last_error else "Off",
-                         "■ ERROR" if self._last_error else "■ OFFLINE")
+                         "Error" if self._last_error else "Offline")
         if not self._last_error:
-            self.connection_note.setText("DISCONNECTED. SERVO TARGETS ARE SAVED IN THE APP.")
-        self.connect_button.setText("CONNECT")
-        self.connect_button.setObjectName("Primary")
+            self.connection_note.setText("Disconnected. Servo targets are kept in memory.")
+        self.connect_button.setText("Connect")
+        self.connect_button.setObjectName("ConnectAction")
         self._repolish(self.connect_button)
         self.ports.setEnabled(True)
         self.refresh_button.setEnabled(True)
@@ -1429,6 +2475,7 @@ class MainWindow(QMainWindow):
 
     def _center_all(self) -> None:
         self._grip_sync_active = False
+        self._set_ctrl_banner(0, 0)
         for card in self.cards.values():
             card.set_angle(DEFAULT_ANGLE)
         if self.arduino_ready and self.worker:
