@@ -16,36 +16,15 @@ MODULE LeftArmMain
    ! CONST robtarget pSafeEntryLeft := [[418, 323, 213],[0.66, 0.66, 0.25, 0.21],[0,0,0,4],[-175,9E9,9E9,9E9,9E9,9E9]]; ! new waypoint
 
     ! CONST robtarget pSafeEntryLeft := [[300, 266.77, 41],[0.5, 0.5, 0.5, 0.5],[0,0,0,4],[-175,9E9,9E9,9E9,9E9,9E9]]; ! new waypoint works
-    VAR robtarget pSafeEntryLeftC := [[300, 266.77, 60],[0.697,0.716,0.04,0.02],[0,0,0,4],[-175,9E9,9E9,9E9,9E9,9E9]]; 
-    VAR robtarget pSafeEntryLeft := [[300, 266.77, 60],[0.697,0.716,0.04,0.02],[0,0,0,4],[-175,9E9,9E9,9E9,9E9,9E9]]; 
-    CONST robtarget pSafeEntryNormalC := [[222, 350, 100],[0.466, 0.512,0.499,0.521],[0,0,0,4],[-175,9E9,9E9,9E9,9E9,9E9]]; 
-    VAR robtarget pSafeEntryNormalV := [[222, 350, 100],[0.466, 0.512,0.499,0.521],[0,0,0,4],[-175,9E9,9E9,9E9,9E9,9E9]]; 
-    
-    CONST robtarget pSafeEntryOvanC := [[484.94, 110, 180],[0.03575, 0.72068,-0.69169,0.03029],[0,0,0,4],[-175,9E9,9E9,9E9,9E9,9E9]]; 
-    VAR robtarget pSafeEntryOvanC2 := [[484.94, 110, 180],[0.03575, 0.72068,-0.69169,0.03029],[0,0,0,4],[-175,9E9,9E9,9E9,9E9,9E9]]; 
-
-    VAR clock cycleClock;  !time
-   
-    
-    ! used for mug manipulation
-    CONST pos sholder_pos_close := [110,200,460];
-    CONST pos sholder_pos_far := [1000,800,460];
     CONST robtarget cup_target := [[499.548,-110.253,-46.3938],[0.0565402,0.114235,0.990146,-0.0580089],[-2,-3,-1,4],[-177.807,9E+09,9E+09,9E+09,9E+09,9E+09]]; 
         
     CONST speeddata movement_speed := v1500;  !1000 !400
-    CONST speeddata pick_speed := v50; !400
+    CONST speeddata pick_speed := v800; !400
     CONST speeddata transit_speed := v1500; ! Optimization: for fast resets !300
     CONST num max_magnitude := 300;         
     
     ! SPEED OPTIMIZATION: Increased step_size for smoother, faster calculation
-    CONST num step_size := 150;             
-        
-    ! used in basic movement
-
-    VAR num x_offset := 0;           
-    VAR num y_offset := 0 ;                
-    VAR num z_offset := 0; 
-    VAR bool switch := False; 
+    CONST num step_size := 150; 
     
     ! used when fetching a mug
     CONST num gripper_offset := 0;    
@@ -129,7 +108,7 @@ MODULE LeftArmMain
             
             CASE flag_hand_over: 
                 ! Logic inside handOverSequence handles synchronization
-                handOverSequence;
+                handOverSequence shared_movement_left.mug.normal;
                 
             ENDTEST
             

@@ -39,9 +39,17 @@ PROC server_init()
     
     ! 2. Since pc_ip is "", the robot will accept your PC (.201)
     ! It will then WRITE "192.168.125.201" into pc_ip.
-    SocketAccept server_socket, client_socket \ClientAddress := pc_ip;
+    SocketAccept server_socket, client_socket \ClientAddress := pc_ip \Time:=WAIT_MAX;
     
     TPWrite "Connected to: " + pc_ip;
+ERROR
+    IF ERRNO = ERR_SOCK_TIMEOUT THEN
+        ! No PC connected yet - keep waiting instead of stopping the task
+        RETRY;
+    ELSEIF robot_bind_ip <> "127.0.0.1" THEN
+        robot_bind_ip := "127.0.0.1";
+        RETRY;
+    ENDIF
 ENDPROC
 
     ! hold comminication while client is connected
@@ -92,7 +100,6 @@ ENDPROC
                 TPWrite("[INFO] message from client: "+message);
                 SocketSend client_socket\Str:="default_"+message;
             ENDTEST
-            WaitTime(delay_time);
             SocketSend client_socket\Str:="Ask_next"; ! ask for next "order"
 
         ENDWHILE

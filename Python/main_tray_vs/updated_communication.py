@@ -94,6 +94,10 @@ class Communication():
         self.FreeSlot = None  # [x, y, z] in robot frame; set by main.py before each placement
         self.LatestMugCoordinates = None
         self.LatestMugNormal = None
+        self.RetryMugCoordinates = None
+        self.RetryMugNormal = None
+        self.retry_lock_requested = False
+        self.retry_lock_event = threading.Event()
         self.pick_attempt_count = 0
         self.retry_history = []
         self.last_pick_start_time = None
@@ -142,18 +146,39 @@ class Communication():
                 case askmug_coordinates if askmug_coordinates in self.ASKMUGCOORDINATES: # RAPID wants mug coordinates
                     with self._mutex_variable:  # Lock mutex for thread-safe access
                         self.pick_attempt_count += 1
-                        if self.pick_attempt_count > 1 and self.LatestMugCoordinates is not None:
-                            print(f"[RETRY #{self.pick_attempt_count}] Grasp miss detected! Refreshing mug coordinates from live camera:")
-                            print(f"         Previous: {self.MugCoordinates}")
-                            print(f"         Fresh:    {self.LatestMugCoordinates}")
-                            self.retry_history.append({
-                                "attempt": self.pick_attempt_count,
-                                "previous_xyz": list(self.MugCoordinates),
-                                "fresh_xyz": list(self.LatestMugCoordinates),
-                            })
-                            self.MugCoordinates = list(self.LatestMugCoordinates)
-                            if self.LatestMugNormal is not None:
-                                self.MugNormal = list(self.LatestMugNormal)
+                        attempt = self.pick_attempt_count
+                        if attempt > 1:
+                            self.RetryMugCoordinates = None
+                            self.RetryMugNormal = None
+                            self.retry_lock_event.clear()
+                            self.retry_lock_requested = True
+
+                    if attempt > 1:
+                        print(f"[RETRY #{attempt}] Grasp miss detected! Waiting for 5-frame camera lock...")
+                        self.retry_lock_event.wait(timeout=5.0)
+
+                    with self._mutex_variable:
+                        if attempt > 1:
+                            self.retry_lock_requested = False
+                            fresh_coords = self.RetryMugCoordinates
+                            fresh_normal = self.RetryMugNormal
+                            if fresh_coords is not None:
+                                print(f"[RETRY #{attempt}] Refreshing mug coordinates from 5-frame camera lock:")
+                                print(f"         Previous: {self.MugCoordinates}")
+                                print(f"         Fresh:    {fresh_coords}")
+                                self.retry_history.append({
+                                    "attempt": attempt,
+                                    "previous_xyz": list(self.MugCoordinates),
+                                    "fresh_xyz": list(fresh_coords),
+                                })
+                                self.MugCoordinates = list(fresh_coords)
+                                if fresh_normal is not None:
+                                    self.MugNormal = list(fresh_normal)
+                            else:
+                                print(
+                                    f"[RETRY #{attempt}] 5-frame camera lock timed out; "
+                                    f"reusing previous 5-frame coordinates: {self.MugCoordinates}"
+                                )
                         self._send_message(str(self.MugCoordinates)) # Send mug coordinates
 
                 case askmug_orientation if askmug_orientation in self.ASKMUGORIENTATION: # RAPID wants mug orientation
@@ -279,6 +304,9 @@ class Communication():
                 self.socket = None
                 self._rx_queue.clear()
                 self._rx_buffer = ""
+                with self._mutex_variable:
+                    self.retry_lock_requested = False
+                    self.retry_lock_event.set()
 
         
     def _send_message(self, message):
@@ -422,6 +450,10 @@ class Communication():
                 self.MugCoordinates = list(coordinates)
                 self.MugOrientation = list(orientation)
                 self.MugNormal = list(normalized_vector)
+                self.RetryMugCoordinates = None
+                self.RetryMugNormal = None
+                self.retry_lock_requested = False
+                self.retry_lock_event.clear()
                 self.pick_attempt_count = 0
                 self.retry_history = []
                 self.last_pick_start_time = time.perf_counter()

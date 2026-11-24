@@ -184,16 +184,42 @@ def confirm_placement(slot_name, tray_mode=None):
 
 # Camera XYZ of pSafeEntryNormal trans [182, 255, 55] mm inverted with active HT.
 LEFT_ENTRY_CAMERA_XYZ_MM = np.array(
-    [-254.3162, -147.0899, 357.3541],
+    [-302, -147.0899, 407.3541],
     dtype=np.float64,
 )
 
 GRASP_FRAME_COUNT = 5
-SAME_CUP_DISTANCE_MM = 40.0
+SAME_CUP_DISTANCE_MM = 25.0
+MAX_PICKUP_X_MM = 600.0
+MIN_PICKUP_Y_MM = -50.0 #35
 
 
-def select_nearest_target(detections, labels):
-    """Nearest valid cup detection to the left-entry reference. Mug pose is not used."""
+def is_within_pickup_work_range(robot_xyz):
+    """Return True when robot_xyz [x, y, z] is inside the allowed pickup workspace."""
+    if robot_xyz is None or len(robot_xyz) < 2:
+        return False
+    return float(robot_xyz[0]) <= MAX_PICKUP_X_MM and float(robot_xyz[1]) >= MIN_PICKUP_Y_MM
+
+
+def select_nearest_target(detections, labels, homogeneous=None):
+    """Nearest valid in-range cup detection to the left-entry reference. Mug pose is not used."""
+    if homogeneous is not None:
+        in_range_detections = []
+        for det in detections:
+            if not (0 <= det.label < len(labels)):
+                continue
+            label = labels[det.label]
+            if cs.is_ignored_detection_label(label):
+                continue
+            coords = det.spatialCoordinates
+            if not np.isfinite([coords.x, coords.y, coords.z]).all() or coords.z <= 0:
+                continue
+            r_xyz = robot_xyz_from_relations(
+                coords.x, coords.y, coords.z, homogeneous, label=label
+            )
+            if is_within_pickup_work_range(r_xyz):
+                in_range_detections.append(det)
+        detections = in_range_detections
     return cs.select_nearest_target(detections, labels, LEFT_ENTRY_CAMERA_XYZ_MM)
 
 
@@ -221,6 +247,37 @@ def grasp_sample_matches(samples, label, camera_xyz):
 
 def median_grasp_xyz(samples):
     return np.median(np.vstack([sample["xyz"] for sample in samples]), axis=0)
+
+
+def compute_mug_normal(label, orientation_map, rotation_matrix):
+    """Map YOLO orientation label to a normalized robot-frame approach normal."""
+    normalized_vector = orientation_map.get(label, [0.0, 1.0, 0.0])
+    norm = np.matmul(rotation_matrix, normalized_vector)
+    if (abs(normalized_vector[1]) < abs(normalized_vector[2])) or (abs(normalized_vector[1]) < abs(normalized_vector[0])):
+        norm -= [0, 0, np.dot(norm, [0, 0, 1])]
+        norm = norm / np.sqrt(np.dot(norm, norm))
+    else:
+        norm[2] = normalized_vector[1] / abs(normalized_vector[1])
+        norm[1] = 0
+        norm[0] = 0
+    return [float(norm[0]), float(norm[1]), float(norm[2])]
+
+
+def summarize_grasp_window(samples, homogeneous):
+    """Compute 5-frame median camera XYZ, 3D spread, label, median confidence, and robot XYZ."""
+    stacked = np.vstack([sample["xyz"] for sample in samples])
+    median_xyz = np.median(stacked, axis=0)
+    spread = np.max(stacked, axis=0) - np.min(stacked, axis=0)
+    label = samples[-1]["label"]
+    conf = int(np.median([sample["conf"] for sample in samples]))
+    target_xyz = robot_xyz_from_relations(
+        float(median_xyz[0]),
+        float(median_xyz[1]),
+        float(median_xyz[2]),
+        homogeneous,
+        label=label,
+    )
+    return median_xyz, spread, label, conf, target_xyz
 
 
 def local_move(
@@ -404,6 +461,10 @@ def choose_detection_model():
         "v5": "v5",
         "5s": "v5s",
         "v5s": "v5s",
+        "new5s": "new5s",
+        "v5s_new": "new5s",
+        "v5s (new)": "new5s",
+        "blob_new5s": "new5s",
         "8": "v8",
         "v8": "v8",
         "11": "v11z",
@@ -412,9 +473,14 @@ def choose_detection_model():
         "v11": "v11z",
         "v11z": "v11z",
         "v11s": "v11z",
+        "11n": "v11n",
+        "v11n": "v11n",
+        "new11n": "v11n",
+        "v11n (new)": "v11n",
+        "blob_11n": "v11n",
     }
     while True:
-        choice = input("Run detection model v5, v5s, v8, or v11Z? Enter 5, 5s, 8, or 11: ").strip().lower()
+        choice = input("Run detection model v5, v5s, new5s, v8, v11Z, or v11n? Enter 5, 5s, new5s, 8, 11, or 11n: ").strip().lower()
         model = model_by_input.get(choice)
         if model is not None:
             print(f"[MODEL] Selected {model}.")
@@ -605,14 +671,15 @@ def run(forced_tray_mode=None):
 
                     frame = in_rgb.getCvFrame()
                     detections = cs.extract_detections(in_dets, in_depth, device, model_info)
-                    selected_target = select_nearest_target(detections, labels)
+                    selected_target = select_nearest_target(detections, labels, homogeneous=homogeneous)
 
                     accept_grasp_sample = not first_run
                     if first_run:
                         first_run = False
                         prev_dev_ts = None
 
-                    if busy:
+                    retry_acquiring = bool(getattr(client, "retry_lock_requested", False))
+                    if busy and not retry_acquiring:
                         grasp_samples = []
                     elif accept_grasp_sample and selected_target is not None:
                         camera_xyz = camera_xyz_of(selected_target)
@@ -623,11 +690,12 @@ def run(forced_tray_mode=None):
                         )
                         if grasp_samples and mismatch_reason is not None:
                             print(f'[FRAME] Target changed. {GRASP_FRAME_COUNT}-frame window restarted.')
-                            report_logger.record_window_reset(mismatch_reason)
+                            if not retry_acquiring:
+                                report_logger.record_window_reset(mismatch_reason)
                             grasp_samples = []
                             previous_count = 0
 
-                        if not grasp_samples:
+                        if not grasp_samples and not retry_acquiring:
                             report_logger.mark_window_started()
 
                         grasp_samples.append({
@@ -644,7 +712,10 @@ def run(forced_tray_mode=None):
                                 f'{camera_xyz[0]:.1f}, {camera_xyz[1]:.1f}, {camera_xyz[2]:.1f}'
                             )
                         elif previous_count < GRASP_FRAME_COUNT:
-                            print(f'[FRAME] {GRASP_FRAME_COUNT}/{GRASP_FRAME_COUNT} ready. Automatic pick will send the median.')
+                            if retry_acquiring:
+                                print(f'[FRAME] {GRASP_FRAME_COUNT}/{GRASP_FRAME_COUNT} ready. Retry pick will send the median.')
+                            else:
+                                print(f'[FRAME] {GRASP_FRAME_COUNT}/{GRASP_FRAME_COUNT} ready. Automatic pick will send the median.')
 
                     # Draw bounding boxes and labels
                     for det in detections:
@@ -673,18 +744,9 @@ def run(forced_tray_mode=None):
                             if det is selected_target:
                                 with client._mutex_variable:
                                     client.LatestMugCoordinates = robot_xyz
-                                    norm_v = orientation_map.get(label, [0.0, 1.0, 0.0])
-                                    norm_calc = np.matmul(rotation_matrix, norm_v)
-                                    if (abs(norm_v[1]) < abs(norm_v[2])) or (abs(norm_v[1]) < abs(norm_v[0])):
-                                        norm_calc -= [0, 0, np.dot(norm_calc, [0, 0, 1])]
-                                        norm_calc = norm_calc / np.sqrt(np.dot(norm_calc, norm_calc))
-                                    else:
-                                        norm_calc[2] = norm_v[1] / abs(norm_v[1])
-                                        norm_calc[1] = 0
-                                        norm_calc[0] = 0
-                                    client.LatestMugNormal = [float(norm_calc[0]), float(norm_calc[1]), float(norm_calc[2])]
-                                    if not busy:
-                                        client.MugCoordinates = robot_xyz
+                                    client.LatestMugNormal = compute_mug_normal(
+                                        label, orientation_map, rotation_matrix
+                                    )
 
                             cv.putText(frame, f'R: {robot_xyz[0]:.1f}, {robot_xyz[1]:.1f}, {robot_xyz[2]:.1f}', (x1 + 5, y1 + 80), cv.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 1)
 
@@ -734,24 +796,35 @@ def run(forced_tray_mode=None):
                             is_busy=busy,
                         )
 
+                    if retry_acquiring and len(grasp_samples) >= GRASP_FRAME_COUNT:
+                        samples_snapshot = list(grasp_samples)
+                        grasp_samples = []
+                        median_xyz, spread, label, conf, retry_target_xyz = summarize_grasp_window(
+                            samples_snapshot, homogeneous
+                        )
+                        retry_norm = compute_mug_normal(label, orientation_map, rotation_matrix)
+
+                        print(f'[RETRY] Next retry mug from {GRASP_FRAME_COUNT} frames ({label}, {conf}%)')
+                        print(f'[HT] retry median camera XYZ mm: {median_xyz[0]:.1f}, {median_xyz[1]:.1f}, {median_xyz[2]:.1f}')
+                        print(f'[HT] retry {GRASP_FRAME_COUNT}-frame range mm: {spread[0]:.1f}, {spread[1]:.1f}, {spread[2]:.1f}')
+                        print(f'[HT] retry robot XYZ mm (compensated X, fixed Z={retry_target_xyz[2]}): {retry_target_xyz}')
+
+                        with client._mutex_variable:
+                            client.RetryMugCoordinates = retry_target_xyz
+                            client.RetryMugNormal = retry_norm
+                            client.LatestMugCoordinates = retry_target_xyz
+                            client.LatestMugNormal = retry_norm
+                            client.retry_lock_requested = False
+                            client.retry_lock_event.set()
+
                     # ==========================================
                     # AUTOMATIC PICK-AND-PLACE TRIGGER
                     # ==========================================
                     if not busy and len(grasp_samples) >= GRASP_FRAME_COUNT:
                         samples_snapshot = list(grasp_samples)
-                        stacked = np.vstack([sample['xyz'] for sample in samples_snapshot])
-                        median_xyz = np.median(stacked, axis=0)
-                        spread = np.max(stacked, axis=0) - np.min(stacked, axis=0)
-                        label = samples_snapshot[-1]['label']
-                        conf = int(np.median([sample['conf'] for sample in samples_snapshot]))
                         grasp_samples = []
-
-                        target_xyz = robot_xyz_from_relations(
-                            float(median_xyz[0]),
-                            float(median_xyz[1]),
-                            float(median_xyz[2]),
-                            homogeneous,
-                            label=label,
+                        median_xyz, spread, label, conf, target_xyz = summarize_grasp_window(
+                            samples_snapshot, homogeneous
                         )
 
                         lock_info = report_logger.record_target_lock(
@@ -769,15 +842,7 @@ def run(forced_tray_mode=None):
                         print(f'[HT] robot XYZ mm (compensated X, fixed Z={target_xyz[2]}): {target_xyz}')
 
                         try:
-                            normalized_vector = orientation_map.get(label, [0.0, 1.0, 0.0])
-                            norm = np.matmul(rotation_matrix, normalized_vector)
-                            if (abs(normalized_vector[1]) < abs(normalized_vector[2])) or (abs(normalized_vector[1]) < abs(normalized_vector[0])):
-                                norm -= [0, 0, np.dot(norm, [0, 0, 1])]
-                                norm = norm / np.sqrt(np.dot(norm, norm))
-                            else:
-                                norm[2] = normalized_vector[1] / abs(normalized_vector[1])
-                                norm[1] = 0
-                                norm[0] = 0
+                            norm = compute_mug_normal(label, orientation_map, rotation_matrix)
 
                             claimed = False
                             with lock:
@@ -792,7 +857,7 @@ def run(forced_tray_mode=None):
                                             quaternion,
                                             client,
                                             target_xyz,
-                                            [float(norm[0]), float(norm[1]), float(norm[2])],
+                                            norm,
                                             False,
                                             file_path,
                                             conf,

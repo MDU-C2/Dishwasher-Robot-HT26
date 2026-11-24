@@ -198,24 +198,24 @@ MODULE processes
         VAR num grasp_attempts :=0;  !test 1
         VAR bool grasped := FALSE; 
         
-                ! Ensure both arms are idle before we even ask Python for coordinates
-        shared_movement_left.wait_flag := FALSE;
-        shared_movement_right.wait_flag := FALSE;
+                ! Ensure Left Arm is idle before asking Python for coordinates; ROB_R may finish homing in parallel
+        WaitUntil shared_movement_left.wait_flag = FALSE;
         shared_movement_left.flag := flag_nothing;
-        shared_movement_right.flag := flag_nothing;
         
         buffer := GetRobVector();
-        ! Ensure Z-safety
-        IF abs(buffer.normal.z) < abs(buffer.normal.x) AND abs(buffer.normal.z) < abs(buffer.normal.y) THEN
-            IF buffer.position.z < 65 THEN
-                buffer.position.z := 65;
-            ENDIF
+        ! Set Z height: 55 for upward (normal.z = 1), 45 for downward
+        IF Round(buffer.normal.z \Dec:=1) = 1.0 THEN
+          !  buffer.position.z := 55;
+            TPWrite "Vision Mug: Upward (Z=55)";
+        ELSE
+         !   buffer.position.z := 45;
+            TPWrite "Vision Mug: Downward (Z=45)";
         ENDIF
-        buffer.position.z := 55;
 
         ! DECISION LOGIC
         IF buffer.position.y < -10000 THEN
             ! CASE 1: Mug is on the far right. Only Right Arm works.
+            WaitUntil shared_movement_right.wait_flag = FALSE;
             shared_movement_right.mug := buffer;
             shared_movement_right.flag := flag_pick_up_mug;
             shared_movement_right.wait_flag := TRUE;
@@ -229,29 +229,10 @@ MODULE processes
             shared_movement_right.hand_over_pose := hand_over_pose;
 
             
-!*************************1 - 4 kommentera bort för test 1******************
-            ! 1. START RIGHT ARM IMMEDIATELY
-            ! It travels to the meeting point while Left is still picking.
-!            shared_movement_right.flag := flag_hand_over;
-!            shared_movement_right.wait_flag := TRUE;
-            
-            
 
-            ! 2. START LEFT ARM PICK
- !           shared_movement_left.mug := buffer; 
- !           shared_movement_left.flag := flag_pick_up_mug;
-  !          shared_movement_left.wait_flag := TRUE;
-
-            ! 3. Wait for Left arm to finish the table pick
-  !          WaitUntil shared_movement_left.wait_flag = FALSE;
-
-            ! 4. Tell Left arm to move to meeting point
-  !          shared_movement_left.flag := flag_hand_over;
-  !          shared_movement_left.wait_flag := TRUE;
-!*******************************************************************************
 
 !test 1  =======================================================================
-        WHILE(grasped = FALSE) AND (grasp_attempts<5) DO
+        WHILE (grasped = FALSE) AND (grasp_attempts < 3) DO
             IF grasp_attempts > 0 THEN
                 WaitTime 0.5;
                 buffer:= GetRobVector();
@@ -271,9 +252,14 @@ MODULE processes
         IF grasped = FALSE THEN
             TPWrite "failed. dont start handover";
             moveToHomeTarget;
+            WaitUntil shared_movement_left.wait_flag = FALSE;
+            WaitUntil shared_movement_right.wait_flag = FALSE;
+            shared_movement_left.flag := flag_nothing;
+            shared_movement_right.flag := flag_nothing;
             RETURN;
         ENDIF
         
+        WaitUntil shared_movement_right.wait_flag = FALSE;
         shared_movement_right.flag := flag_hand_over;
         shared_movement_right.wait_flag := TRUE;
         
@@ -306,27 +292,29 @@ MODULE processes
         TPWrite "System Reset: Ready for next mug.";
         ENDIF
         
-        moveToHomeTarget;
+        ! ROB_L already homed during leaveSequence; send only ROB_R home asynchronously
+        WaitUntil shared_movement_right.wait_flag = FALSE;
+        shared_movement_right.flag := flag_move_home_target;
+        shared_movement_right.wait_flag := TRUE;
     ENDPROC
     
-        PROC HandOverSyncLogic()
-        ! A. Wait for both arms to arrive at handover offsets
+                        PROC HandOverSyncLogic()
+        ! A. Wait for Left arm to reach meeting point and Right arm to reach 100mm approach point
         WaitUntil shared_movement_right.wait_flag = FALSE;
         WaitUntil shared_movement_left.wait_flag = FALSE;
         
-        ! B. Tell Right arm to move in and GRIP
+        ! B. Tell Right arm to glide in the final 100mm and GRIP
         shared_movement_right.wait_flag := TRUE;
         
         ! C. Wait for Right arm to finish physical gripping
         WaitUntil shared_movement_right.wait_flag = FALSE;
-        !WaitTime 1.2; ! buffer for right to have gripped 1.2
+        WaitTime 0.1;
         
-        ! D. Tell Left arm to RELEASE and move back
+        ! D. Tell Left arm to RELEASE and return to Home
         shared_movement_left.wait_flag := TRUE;
         
-        ! E. Wait for Left arm to signal it is clear
+        ! E. Wait for Left arm to signal it has backed up 150mm away from mug
         WaitUntil shared_movement_left.wait_flag = FALSE;
-        !WaitTime 1;
         
         ! Reset flags
         shared_movement_left.flag := flag_nothing;
@@ -345,7 +333,8 @@ MODULE processes
         shared_movement_right.mug.position := next_free_slot;
         
         
-        ! 3. Trigger the Right Arm to execute LeaveMugUprightV2
+        ! 3. Ensure Right Arm is ready, then trigger LeaveMugUprightV3
+        WaitUntil shared_movement_right.wait_flag = FALSE;
         shared_movement_right.flag := flag_leave_mug;
         shared_movement_right.wait_flag := TRUE;
         
@@ -368,7 +357,6 @@ MODULE processes
         return_target:=[[611.44,-10,224.449],[0.00944177,-0.683755,0.728027,-0.0486451],[0,-1,-2,4],[-160.18,9E+09,9E+09,9E+09,9E+09,9E+09]];
         !CRobT(\Tool:= tGripper); !init values
 
-        WaitTime(delay_time);
         SocketSend client_socket\Str:="Ask_MugCoordinate";
         SocketReceive client_socket\Str:=message;
         sucess:=rob_coordinates(message,return_target.trans);
@@ -400,8 +388,6 @@ MODULE processes
 
         return_target.rot:=NormilizeRotation(return_target.rot);
 
-        WaitTime(delay_time);
-
         RETURN return_target;
     ERROR
         IF ERRNO = ERR_SOCK_CLOSED THEN
@@ -422,7 +408,6 @@ MODULE processes
         VAR bool sucess:=FALSE;
         VAR pos return_Coordinates;
 
-        WaitTime(delay_time);
         SocketSend client_socket\Str:="Ask_MugCoordinate";
         SocketReceive client_socket\Str:=message;
         sucess:=rob_coordinates(message,return_Coordinates);
@@ -469,8 +454,6 @@ MODULE processes
 
         return_Orientation:=NormilizeRotation(return_Orientation);
 
-        WaitTime(delay_time);
-
         RETURN return_Orientation;
         
     ENDFUNC
@@ -500,8 +483,6 @@ MODULE processes
         IF ERRNO=ERR_ROBLIMIT THEN
             ! exead limit, send error to client and expect new coordinates
             RETURN FALSE;
-        ELSEIF ERRNO=ERR_OUTSIDE_REACH THEN
-            RETURN FALSE;
         ENDIF
     ENDFUNC
 
@@ -511,7 +492,6 @@ MODULE processes
         return_target:=[[611.44,-10,224.449],[0.00944177,-0.683755,0.728027,-0.0486451],[0,-1,-2,4],[-160.18,9E+09,9E+09,9E+09,9E+09,9E+09]];
         !CRobT(\Tool:= tGripper); !init values
 
-        WaitTime(delay_time);
         SocketSend client_socket\Str:="Ask_Coordinate";
         SocketReceive client_socket\Str:=message;
         sucess:=rob_coordinates(message,return_target.trans);
@@ -525,7 +505,6 @@ MODULE processes
         ENDWHILE
         TPWrite "Recieved pos(GetRobTarget):"\Pos:=return_target.trans;
         SocketSend client_socket\Str:="Ack_Coordinate";
-        WaitTime(delay_time);
         SocketSend client_socket\Str:="Ask_Orientation";
 
         ! expect message [q1,q2,q3,q4] commands next
@@ -545,7 +524,6 @@ MODULE processes
 
 
         SocketSend client_socket\Str:="Ack_Orientation";
-        WaitTime(delay_time);
 
         RETURN return_target;
     ERROR
@@ -599,7 +577,6 @@ MODULE processes
         
         TPWrite "Recieved pos:" \Pos:=target.position;
         SocketSend client_socket \Str:="Ack_Coordinate";
-        WaitTime(delay_time);
         
         ! --- 2. NORMAL VECTOR RETRIEVAL ---
         SocketSend client_socket \Str:="Ask_MugNormal";
@@ -616,7 +593,6 @@ MODULE processes
             sucess := rob_coordinates(message, target.normal);
         ENDWHILE
         
-        WaitTime(delay_time);
         RETURN target;
 
     ERROR

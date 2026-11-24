@@ -9,6 +9,20 @@ _V11Z_BLOB = os.path.join(_MODEL_DIR, "blob_v11z", "v11Z.blob")
 if not os.path.isfile(_V11Z_BLOB):
     _V11Z_BLOB = os.path.join(_MODEL_DIR, "v11Z.blob")
 
+def _resolve_blob_dir(folder_name):
+    """Resolve a blob model folder inside main_tray_vs first, falling back to parent folder."""
+    local_dir = os.path.join(_MODEL_DIR, folder_name)
+    if os.path.isdir(local_dir):
+        return local_dir
+    parent_dir = os.path.join(os.path.dirname(_MODEL_DIR), folder_name)
+    if os.path.isdir(parent_dir):
+        return parent_dir
+    return local_dir
+
+
+_NEW5S_DIR = _resolve_blob_dir("blob_new5s")
+_V11N_DIR = _resolve_blob_dir("blob_11n")
+
 DETECTION_MODELS = {
     "v5": {
         "config": os.path.join(_MODEL_DIR, "blob_v5", "best_Yolo5_small.json"),
@@ -18,6 +32,10 @@ DETECTION_MODELS = {
         "config": os.path.join(_MODEL_DIR, "blob_v5s", "config_legacy.json"),
         "blob": os.path.join(_MODEL_DIR, "blob_v5s", "best.blob"),
     },
+    "new5s": {
+        "config": os.path.join(_NEW5S_DIR, "config_legacy.json"),
+        "blob": os.path.join(_NEW5S_DIR, "best.blob"),
+    },
     "v8": {
         "config": os.path.join(_MODEL_DIR, "blob_v8n", "config_legacy.json"),
         "blob": os.path.join(_MODEL_DIR, "blob_v8n", "best.blob"),
@@ -26,10 +44,18 @@ DETECTION_MODELS = {
         "config": os.path.join(_MODEL_DIR, "blob_v11z", "config_legacy.json"),
         "blob": _V11Z_BLOB,
     },
+    "v11n": {
+        "config": os.path.join(_V11N_DIR, "config_legacy.json"),
+        "blob": os.path.join(_V11N_DIR, "best.blob"),
+    },
 }
 _MODEL_ALIASES = {
     "5": "v5",
     "5s": "v5s",
+    "new5s": "new5s",
+    "v5s_new": "new5s",
+    "v5s (new)": "new5s",
+    "blob_new5s": "new5s",
     "8": "v8",
     "11": "v11z",
     "11z": "v11z",
@@ -37,6 +63,11 @@ _MODEL_ALIASES = {
     "v11": "v11z",
     "v11s": "v11z",
     "v11z": "v11z",
+    "11n": "v11n",
+    "v11n": "v11n",
+    "new11n": "v11n",
+    "v11n (new)": "v11n",
+    "blob_11n": "v11n",
 }
 
 
@@ -88,11 +119,11 @@ def _uses_raw_yolo_output(blob_path):
 
 
 def load_detection_model(model):
-    """Return config, blob path, and network input size for v5, v5s, v8, or v11z."""
+    """Return config, blob path, and network input size for v5, v5s, new5s, v8, v11z, or v11n."""
     key = str(model).strip().lower()
     key = _MODEL_ALIASES.get(key, key)
     if key not in DETECTION_MODELS:
-        raise ValueError(f"Unknown detection model '{model}'. Use v5, v5s, v8, or v11z.")
+        raise ValueError(f"Unknown detection model '{model}'. Use v5, v5s, new5s, v8, v11z, or v11n.")
     paths = DETECTION_MODELS[key]
     with open(paths["config"], "r", encoding="utf-8") as f:
         config = json.load(f)
@@ -312,7 +343,7 @@ def camera_setup(cam_coords, robot_file, model="v5"):
     cam_rgb.setPreviewSize(input_width, input_height)
     cam_rgb.setInterleaved(False)
     cam_rgb.setColorOrder(dai.ColorCameraProperties.ColorOrder.BGR)
-    if detection_model["name"] in ("v5s", "v8", "v11z"):
+    if detection_model["name"] in ("v5s", "new5s", "v8", "v11z", "v11n"):
         cam_rgb.setResolution(dai.ColorCameraProperties.SensorResolution.THE_1080_P)
         cam_rgb.setPreviewKeepAspectRatio(False)
     else:
@@ -327,7 +358,7 @@ def camera_setup(cam_coords, robot_file, model="v5"):
     # Stereo depth configuration
     stereo.setDefaultProfilePreset(dai.node.StereoDepth.PresetMode.HIGH_DENSITY)
     stereo.setDepthAlign(dai.CameraBoardSocket.RGB)
-    if detection_model["name"] in ("v5s", "v8", "v11z"):
+    if detection_model["name"] in ("v5s", "new5s", "v8", "v11z", "v11n"):
         stereo.setOutputSize(input_width, input_height)
         stereo.setOutputKeepAspectRatio(False)
     else:

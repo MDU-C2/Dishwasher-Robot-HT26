@@ -1,0 +1,219 @@
+========================================================================================
+                 ABB YuMi VISION & PICK-AND-PLACE EVALUATION REPORT
+========================================================================================
+Run ID / Start Time       : 2026-11-18 13:52:17
+
+----------------------------------------------------------------------------------------
+ 1. DETECTION MODEL & VISION FILTER SETTINGS
+----------------------------------------------------------------------------------------
+  Model Selected          : YOLO v5s
+  Model Blob File         : best.blob
+  Network Input Size      : 416 x 416 px
+  Confidence / IoU Thresh : Conf >= 0.5  |  IoU <= 0.5
+  Classes (7)            : Back, Front, Gripper, left_side, right_side, upright, upside_down
+  Stability Filter        : Requires 5 consecutive distinct frames with identical label & within 25 mm
+
+----------------------------------------------------------------------------------------
+ 2. HAND-EYE TRANSFORMATION MATRIX VERIFICATION (TABLE-LEVEL CUPS)
+----------------------------------------------------------------------------------------
+  Active Matrix           : raw / HT_New_Run2_Mean
+  Linear X Compensation   : robot_x = 1.401822 * ht_x - 198.521 mm (Y unchanged)
+  Grasp Heights (Fixed Z) : Upright = 55.0 mm  |  Downward/Side = 45.0 mm
+
+  Verification on 9 Physical Table Cup Positions (Predicted vs. Jogged Pendant):
+  +-------+-----------------------+-----------------------+----------+----------+------------+
+  | Cup # | Predicted XY (mm)     | Actual Jogged XY (mm) | Error dX | Error dY | 2D Err |e| |
+  +-------+-----------------------+-----------------------+----------+----------+------------+
+  |   #1  | [ 303.63,   46.91]   | [ 301.31,   37.16]   |  +2.32mm |  +9.75mm |   10.02 mm |
+  |   #2  | [ 416.16,   62.75]   | [ 415.81,   56.22]   |  +0.35mm |  +6.53mm |    6.54 mm |
+  |   #3  | [ 499.64,  145.66]   | [ 511.33,  143.29]   | -11.69mm |  +2.37mm |   11.93 mm |
+  |   #4  | [ 635.22,   60.05]   | [ 640.01,   55.30]   |  -4.79mm |  +4.75mm |    6.75 mm |
+  |   #5  | [ 654.65,  203.12]   | [ 656.44,  199.36]   |  -1.79mm |  +3.76mm |    4.17 mm |
+  |   #6  | [ 285.85,  105.40]   | [ 292.20,  104.56]   |  -6.35mm |  +0.84mm |    6.41 mm |
+  |   #7  | [ 522.62,  152.78]   | [ 512.79,  149.42]   |  +9.83mm |  +3.36mm |   10.39 mm |
+  |   #8  | [ 507.76,   52.45]   | [ 499.70,   39.00]   |  +8.06mm | +13.45mm |   15.68 mm |
+  |   #9  | [ 441.31,   63.71]   | [ 437.23,   54.21]   |  +4.08mm |  +9.50mm |   10.34 mm |
+  +-------+-----------------------+-----------------------+----------+----------+------------+
+  Summary ->  2D XY RMS Error : 9.72 mm  |  Mean Error : 9.14 mm  |  Max Error : 15.68 mm
+              X-Axis RMSE     : 6.56 mm  |  Y-Axis RMSE: 7.17 mm
+
+========================================================================================
+ 3. PER-CUP PICK-AND-PLACE LOG
+========================================================================================
+
+  +------------------------------------------------------------------------------------+
+  | CUP #1    (2026-11-18 13:52:23)  -  Orientation: upright       Confidence:  93.0% |
+  +------------------------------------------------------------------------------------+
+  | [Vision Speed]   On-Chip AI Inference:  59.3 ms  |  Camera->PC Latency: 372.3 ms  |  21.7 FPS
+  | [5-Frame Lock]   Time to Lock 5 Frames:  0.27 s  |  Flicker Resets: 1 (Label=1, Jump=0)
+  | [3D Coordinates] Camera XYZ: [-148.85, 2.89, 577.89] mm (Dist: 596.8 mm)
+  | [3D Stability]   5-Frame Jitter Range dXYZ: [1.71, 0.0, 0.0] mm (Total Spread: 1.71 mm)
+  | [Robot Target]   Pick XYZ: [429.39, 156.87, 55.0] mm  ->  Tray 'slot_1' @ [645.0, -516.0, 170.0] mm
+  | [Grasp & Tray]   Pick Attempts: 1 (First-Try Success)  |  Tray Check: Verified in Tray (OK)
+  | [Robot Timing]   Left Arm (Pick + Handover)         :   8.51 s
+  |                  Right Arm (Handover -> Leave Tray) :   2.22 s
+  |                  ROBOT CYCLE TIME (Start -> In Tray):  10.73 s
+  +------------------------------------------------------------------------------------+
+
+  +------------------------------------------------------------------------------------+
+  | CUP #2    (2026-11-18 13:52:35)  -  Orientation: upright       Confidence:  86.0% |
+  +------------------------------------------------------------------------------------+
+  | [Vision Speed]   On-Chip AI Inference:  81.1 ms  |  Camera->PC Latency: 417.4 ms  |  17.6 FPS
+  | [5-Frame Lock]   Time to Lock 5 Frames:  0.04 s  |  Flicker Resets: 0 (Label=0, Jump=0)
+  | [3D Coordinates] Camera XYZ: [-3.87, -64.6, 435.51] mm (Dist: 440.3 mm)
+  | [3D Stability]   5-Frame Jitter Range dXYZ: [1.29, 0.73, 0.0] mm (Total Spread: 1.48 mm)
+  | [Robot Target]   Pick XYZ: [281.55, 12.94, 55.0] mm  ->  Tray 'slot_2' @ [552.0, -524.0, 160.0] mm
+  | [Grasp & Tray]   Pick Attempts: 1 (First-Try Success)  |  Tray Check: Verified in Tray (OK)
+  | [Robot Timing]   Left Arm (Pick + Handover)         :   8.05 s
+  |                  Right Arm (Handover -> Leave Tray) :   2.12 s
+  |                  ROBOT CYCLE TIME (Start -> In Tray):  10.17 s
+  +------------------------------------------------------------------------------------+
+
+  +------------------------------------------------------------------------------------+
+  | CUP #3    (2026-11-18 13:52:46)  -  Orientation: upright       Confidence:  92.0% |
+  +------------------------------------------------------------------------------------+
+  | [Vision Speed]   On-Chip AI Inference:  72.2 ms  |  Camera->PC Latency: 371.1 ms  |  18.8 FPS
+  | [5-Frame Lock]   Time to Lock 5 Frames:  0.28 s  |  Flicker Resets: 0 (Label=0, Jump=0)
+  | [3D Coordinates] Camera XYZ: [-31.78, -8.05, 536.61] mm (Dist: 537.6 mm)
+  | [3D Stability]   5-Frame Jitter Range dXYZ: [0.58, 1.04, 9.76] mm (Total Spread: 9.83 mm)
+  | [Robot Target]   Pick XYZ: [381.56, 40.05, 55.0] mm  ->  Tray 'slot_3' @ [463.0, -528.0, 160.0] mm
+  | [Grasp & Tray]   Pick Attempts: 1 (First-Try Success)  |  Tray Check: Verified in Tray (OK)
+  | [Robot Timing]   Left Arm (Pick + Handover)         :   8.52 s
+  |                  Right Arm (Handover -> Leave Tray) :   2.12 s
+  |                  ROBOT CYCLE TIME (Start -> In Tray):  10.63 s
+  +------------------------------------------------------------------------------------+
+
+  +------------------------------------------------------------------------------------+
+  | CUP #4    (2026-11-18 13:52:57)  -  Orientation: upright       Confidence:  96.0% |
+  +------------------------------------------------------------------------------------+
+  | [Vision Speed]   On-Chip AI Inference:  75.6 ms  |  Camera->PC Latency: 387.3 ms  |  18.4 FPS
+  | [5-Frame Lock]   Time to Lock 5 Frames:  0.28 s  |  Flicker Resets: 0 (Label=0, Jump=0)
+  | [3D Coordinates] Camera XYZ: [-139.81, 64.39, 715.48] mm (Dist: 731.9 mm)
+  | [3D Stability]   5-Frame Jitter Range dXYZ: [0.0, 0.0, 0.0] mm (Total Spread: 0.00 mm)
+  | [Robot Target]   Pick XYZ: [573.73, 146.82, 55.0] mm  ->  Tray 'slot_4' @ [374.0, -535.0, 160.0] mm
+  | [Grasp & Tray]   Pick Attempts: 3 (Succeeded on Attempt #3 (2x retry))  |  Tray Check: Verified in Tray (OK)
+  |   -> Retry #2: Prev=[573.73, 146.82, 55.0] -> Fresh=[575.0, 140.48, 55.0]
+  |   -> Retry #3: Prev=[575.0, 140.48, 55.0] -> Fresh=[575.0, 138.36, 55.0]
+  | [Robot Timing]   Left Arm (Pick + Handover)         :  23.95 s
+  |                  Right Arm (Handover -> Leave Tray) :   2.12 s
+  |                  ROBOT CYCLE TIME (Start -> In Tray):  26.07 s
+  +------------------------------------------------------------------------------------+
+
+  +------------------------------------------------------------------------------------+
+  | CUP #5    (2026-11-18 13:53:23)  -  Orientation: upright       Confidence:  97.0% |
+  +------------------------------------------------------------------------------------+
+  | [Vision Speed]   On-Chip AI Inference:  77.8 ms  |  Camera->PC Latency: 403.9 ms  |  17.8 FPS
+  | [5-Frame Lock]   Time to Lock 5 Frames:  0.05 s  |  Flicker Resets: 0 (Label=0, Jump=0)
+  | [3D Coordinates] Camera XYZ: [3.56, 39.07, 601.0] mm (Dist: 602.3 mm)
+  | [3D Stability]   5-Frame Jitter Range dXYZ: [0.0, 0.0, 0.0] mm (Total Spread: 0.00 mm)
+  | [Robot Target]   Pick XYZ: [439.04, 4.16, 55.0] mm  ->  Tray 'slot_5' @ [295.0, -100.0, 160.0] mm
+  | [Grasp & Tray]   Pick Attempts: 3 (Succeeded on Attempt #3 (2x retry))  |  Tray Check: Not Verified
+  |   -> Retry #2: Prev=[439.04, 4.16, 55.0] -> Fresh=[502.36, 1.61, 55.0]
+  |   -> Retry #3: Prev=[502.36, 1.61, 55.0] -> Fresh=[514.86, 178.89, 55.0]
+  | [Robot Timing]   Left Arm (Pick + Handover)         :  27.71 s
+  |                  Right Arm (Handover -> Leave Tray) :   1.81 s
+  |                  ROBOT CYCLE TIME (Start -> In Tray):  29.53 s
+  +------------------------------------------------------------------------------------+
+
+  +------------------------------------------------------------------------------------+
+  | CUP #6    (2026-11-18 13:54:05)  -  Orientation: upright       Confidence:  95.0% |
+  +------------------------------------------------------------------------------------+
+  | [Vision Speed]   On-Chip AI Inference:  80.0 ms  |  Camera->PC Latency: 444.5 ms  |  17.8 FPS
+  | [5-Frame Lock]   Time to Lock 5 Frames:  1.46 s  |  Flicker Resets: 0 (Label=0, Jump=0)
+  | [3D Coordinates] Camera XYZ: [-107.09, -7.42, 556.48] mm (Dist: 566.7 mm)
+  | [3D Stability]   5-Frame Jitter Range dXYZ: [1.65, 1.85, 0.0] mm (Total Spread: 2.48 mm)
+  | [Robot Target]   Pick XYZ: [407.18, 115.27, 55.0] mm  ->  Tray 'slot_5' @ [295.0, -100.0, 160.0] mm
+  | [Grasp & Tray]   Pick Attempts: 1 (First-Try Success)  |  Tray Check: Verified in Tray (OK)
+  | [Robot Timing]   Left Arm (Pick + Handover)         :   8.65 s
+  |                  Right Arm (Handover -> Leave Tray) :  55.39 s
+  |                  ROBOT CYCLE TIME (Start -> In Tray):  64.03 s
+  +------------------------------------------------------------------------------------+
+
+========================================================================================
+ 4. VISION & NEURAL NETWORK LATENCY SUMMARY
+========================================================================================
+  HOW TO READ THESE LATENCY METRICS:
+
+    [Camera Sensor] ---> [OAK-D AI Chip (YOLO + Depth)] ---> [USB Transfer] ---> [Python PC]
+                    |<---- 1. On-Chip AI Inference ---->|<-- 2. USB/Queue ->|
+                    |<------------ 3. Camera -> PC Total Latency ---------->|
+
+   1. On-Chip AI Inference Time  : Exact time per detection on the OAK-D Myriad X chip
+                                   (measured via the camera's internal hardware clock).
+   2. USB Transfer & Host Delay  : Additional time for USB transfer and PC frame sync.
+   3. Camera -> PC Total Latency : Total real-time delay from camera sensor capture until
+                                   the 3D coordinates are read by Python on the PC.
+   4. Detection Speed (FPS)      : True neural network detections per second (1000 / AI ms).
+
+  Session Duration          : 173.3 s  (2051 distinct camera frames)
+  Detection Availability    : 1586/2051 frames (77.3%) had detections | 42.1% had a valid 3D target
+
++--------------------------------------------+------------+------------+------------+------------+------------+
+| Latency / Speed Metric                     |    Average |     Median |    Std Dev |  Min (Best)| Max (Worst)|
++--------------------------------------------+------------+------------+------------+------------+------------+
+| 1. On-Chip AI Inference Time (OAK-D)       | 73.3 ms | 66.7 ms | 41.1 ms | 33.2 ms | 300.0 ms |
+| 2. USB Transfer & Host Queue Delay         | 312.1 ms | 311.3 ms | 60.1 ms | 67.3 ms | 749.9 ms |
+| 3. Camera -> PC Total Latency              | 389.4 ms | 375.0 ms | 64.2 ms | 263.4 ms | 811.6 ms |
+| 4. Detection Speed (AI Throughput)         | 18.9 FPS | 15.0 FPS | 10.1 FPS | 3.3 FPS | 30.1 FPS |
+| 5. PC OpenCV Display Loop Time             | 82.0 ms | 27.3 ms | 134.3 ms | 2.3 ms | 2194.0 ms |
++--------------------------------------------+------------+------------+------------+------------+------------+
+
+  Visual Latency Breakdown (Average ms):
+    1. On-Chip AI Inference : [#####.......................]   73.3 ms
+    2. USB & Host Overhead  : [######################......]  312.1 ms
+    3. Total Cam->PC Latency: [############################]  389.4 ms
+
+========================================================================================
+ 5. PER-CLASS DETECTION & CONFIDENCE BREAKDOWN
+========================================================================================
++------------------+---------+---------+-------------+-------------+---------+---------+--------------+
+| Class Label      |   Count |   Share |   Mean Conf |    Std Conf |     Min |     Max | Mean Depth Z |
++------------------+---------+---------+-------------+-------------+---------+---------+--------------+
+| upright          |    1673 |   74.9% |      91.1 % |      11.5 % |    50 % |    98 % |     646.6 mm |
+| upside_down      |     550 |   24.6% |      91.0 % |       7.8 % |    50 % |    95 % |     804.1 mm |
+| Front            |       4 |    0.2% |      56.2 % |       1.5 % |    55 % |    58 % |     429.3 mm |
+| Back             |       4 |    0.2% |      70.2 % |       5.8 % |    65 % |    76 % |     715.7 mm |
+| Gripper          |       2 |    0.1% |      60.6 % |       6.4 % |    56 % |    65 % |     395.4 mm |
++------------------+---------+---------+-------------+-------------+---------+---------+--------------+
+
+========================================================================================
+ 6. 5-FRAME STABILITY & FLICKER FILTER SUMMARY
+========================================================================================
+  Total 5-Frame Target Locks : 7
+  Total Window Resets        : 2  (Orientation Label Flicker: 2  |  3D Jump >25mm: 0)
+
++--------------------------------------------+------------+------------+------------+------------+------------+
+| 5-Frame Stability Metric                   |    Average |     Median |    Std Dev |  Min (Best)| Max (Worst)|
++--------------------------------------------+------------+------------+------------+------------+------------+
+| Time to Lock 5 Consistent Frames           | 0.37  s | 0.27  s | 0.49  s | 0.04  s | 1.46  s |
+| 5-Frame Camera X Jitter (Max - Min)        | 1.52 mm | 1.65 mm | 0.65 mm | 0.58 mm | 2.35 mm |
+| 5-Frame Camera Y Jitter (Max - Min)        | 2.54 mm | 1.45 mm | 2.70 mm | 0.73 mm | 6.53 mm |
+| 5-Frame Depth Z Jitter (Max - Min)         | 20.07 mm | 20.07 mm | 14.57 mm | 9.76 mm | 30.37 mm |
+| 5-Frame Total 3D Jitter Norm               | 9.33 mm | 2.48 mm | 12.68 mm | 1.48 mm | 31.16 mm |
++--------------------------------------------+------------+------------+------------+------------+------------+
+
+========================================================================================
+ 7. ROBOT CYCLE TIME SUMMARY (START MOVE -> LEFT OBJECT IN TRAY)
+========================================================================================
+  NOTE: Robot Cycle Time measures strictly the physical robot execution from the
+        moment the robot starts moving toward the mug until the mug is left in the tray.
+        (Excludes 2D camera slot-selection and post-placement verification polling.)
+
+  Total Cups Attempted       : 6  (Completed to Tray: 6)
+  First-Try Grasp Success    : 4/6 (66.7%)  |  Total Grasp Retries: 4
+  2D Tray Verification Rate  : 5/6 (83.3%)
+
++--------------------------------------------+------------+------------+------------+------------+------------+
+| Robot Motion Phase                         |    Average |     Median |    Std Dev |  Min (Fast)| Max (Slow) |
++--------------------------------------------+------------+------------+------------+------------+------------+
+| 1. Left Arm (Pick + Handover)              | 14.23  s | 8.58  s | 9.07  s | 8.05  s | 27.71  s |
+| 2. Right Arm (Handover -> Leave in Tray)   | 10.96  s | 2.12  s | 21.76  s | 1.81  s | 55.39  s |
+| TOTAL ROBOT CYCLE (Start Move -> In Tray)  | 25.19  s | 18.40  s | 20.86  s | 10.17  s | 64.03  s |
++--------------------------------------------+------------+------------+------------+------------+------------+
+
+  Visual Robot Cycle Share (Average s):
+    Left Arm (Pick+Handover) : [################............]  14.23 s (56.5%)
+    Right Arm (Tray Place)   : [############................]  10.96 s (43.5%)
+    TOTAL ROBOT CYCLE TIME   : [############################]  25.19 s (100.0%)
+
+========================================================================================
