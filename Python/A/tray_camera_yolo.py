@@ -293,6 +293,12 @@ def _draw():
         cv.putText(v, f"{n}: {txt}", (x1, max(y1 - 10, 12)),
                    cv.FONT_HERSHEY_SIMPLEX, 0.55, col, 2)
     _tracker.draw(v)
+    ref_coords = get_ref_robot_coords()
+    if "slot_1" in ref_coords and "slot_1" in coords:
+        r1 = ref_coords["slot_1"]
+        c1 = coords["slot_1"]
+        delta_str = f"slot_1 ref:{r1} -> live:{c1} (dX:{round(c1[0]-r1[0],1)}, dY:{round(c1[1]-r1[1],1)})"
+        cv.putText(v, delta_str, (10, 52), cv.FONT_HERSHEY_SIMPLEX, 0.55, (0, 200, 255), 2)
     status_text = f"[TRAY YOLO] Model: best.pt | Cups: {len(cups_to_draw)} | Next: {nx or 'None'}"
     cv.putText(v, status_text, (10, 25), cv.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2)
     _view = v

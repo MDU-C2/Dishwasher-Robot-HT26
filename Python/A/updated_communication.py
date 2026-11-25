@@ -15,8 +15,8 @@ class Communication():
 
         self.sleep_time = 0
 
-        self._mutex_variable = threading.Lock()  #mutex for accessing variables
-        self._mutex_function = threading.Lock()  #mutex for accessing functions
+        self._mutex_variable = threading.RLock()  #mutex for accessing variables
+        self._mutex_function = threading.RLock()  #mutex for accessing functions
         self.socket = None
         self.port = 1025
         self.host = '192.168.125.1'

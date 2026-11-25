@@ -53,7 +53,7 @@ class TrayArucoTracker:
                 print(f"[ARUCO ERROR] Failed to load {REF_ARUCO_PATH}: {e}")
         return False
 
-    def save_reference(self, corners, marker_size_mm=50.0):
+    def save_reference(self, corners, marker_size_mm=25.0):
         c = np.array(corners, dtype=np.float32).reshape(4, 2)
         side_px = float(np.mean([
             np.linalg.norm(c[1] - c[0]),
@@ -168,13 +168,12 @@ class TrayArucoTracker:
         dy_cam_mm = self.delta_y_pix * self.mm_per_pix
         dtheta = self.delta_theta_rad
 
-        # Mapping overhead camera movement (X_cam=right, Y_cam=down) to ABB YuMi base coordinates:
-        # Looking down at table: +X_cam corresponds to +Y_robot or -Y_robot; +Y_cam corresponds to +X_robot or -X_robot.
-        # Standard hand-eye mapping for ABB YuMi table workspace:
-        # dx_robot = dy_cam_mm (moving down in camera image moves towards robot base in X)
-        # dy_robot = -dx_cam_mm (moving right in camera image moves left in YuMi Y)
-        dx_robot = float(dy_cam_mm)
-        dy_robot = float(-dx_cam_mm)
+        # Mapping overhead tray camera movement (X_cam=right, Y_cam=down) to ABB YuMi base coordinates:
+        # Verified against slot_positions.json:
+        #   Left-to-right in tray image (slot_6 -> slot_1): Robot X goes 650 -> 240 => dx_robot = -dx_cam_mm
+        #   Top-to-bottom in tray image (slot_1 -> slot_7 -> slot_11): Robot Y goes -550 -> -380 -> -160 => dy_robot = dy_cam_mm
+        dx_robot = float(-dx_cam_mm)
+        dy_robot = float(dy_cam_mm)
         
         updated = {}
         for k, xyz in ref_robot_coords.items():

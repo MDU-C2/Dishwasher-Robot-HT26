@@ -59,7 +59,7 @@ def calibrate_aruco_reference():
         cv.imshow(win, disp)
         key = cv.waitKey(1) & 0xFF
         if key == ord('c') and found and corners is not None:
-            tracker.save_reference(corners)
+            tracker.save_reference(corners, marker_size_mm=25.0)
             # Synchronize the main tray camera tracker instance with the new reference
             tc.get_tracker().load_reference()
             captured = True
