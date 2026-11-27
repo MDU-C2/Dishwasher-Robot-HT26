@@ -65,18 +65,26 @@ def set_lidar_and_loop_config(
     hold_deadband: int,
     grip_timeout_ms: int = 2200,
     slip_speed_pct: int = 14,
+    slip_confirm_ms: int = 350,
+    palm_zone_mm: int = 45,
 ) -> str:
     return (
         f"LOOPCAL,{trigger_mm},{dwell_ms},{slip_vel_mm_s},"
         f"{release_ms},{boost_step},{hold_deadband},"
-        f"{grip_timeout_ms},{slip_speed_pct}\n"
+        f"{grip_timeout_ms},{slip_speed_pct},{slip_confirm_ms},{palm_zone_mm}\n"
     )
 
 
 def set_auto_modes(
-    auto_lidar_grip: bool, slip_detection: bool, force_hold: bool = True
+    auto_lidar_grip: bool,
+    slip_detection: bool,
+    force_hold: bool = True,
+    slip_sensor_mode: int = 0,
 ) -> str:
-    return f"AUTOMODE,{int(auto_lidar_grip)},{int(slip_detection)},{int(force_hold)}\n"
+    return (
+        f"AUTOMODE,{int(auto_lidar_grip)},{int(slip_detection)},"
+        f"{int(force_hold)},{int(slip_sensor_mode)}\n"
+    )
 
 
 def parse_line(line: str) -> tuple[str, list[str]]:

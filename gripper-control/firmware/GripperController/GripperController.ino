@@ -14,8 +14,8 @@
 //   OPTCAL,<motion_thr>,<squal_thr>
 //   OPTLED,<0|1>
 //   OPTZERO
-//   LOOPCAL,<trigger_mm>,<dwell_ms>,<slip_vel_mm_s>,<release_ms>,<boost_step>,<hold_deadband>[,<grip_timeout_ms>,<slip_speed_pct>]
-//   AUTOMODE,<auto_lidar_grip>,<slip_enabled>[,<force_hold_enabled>]
+//   LOOPCAL,<trigger_mm>,<dwell_ms>,<slip_vel_mm_s>,<release_ms>,<boost_step>,<hold_deadband>[,<grip_timeout_ms>,<slip_speed_pct>,<slip_confirm_ms>,<palm_zone_mm>]
+//   AUTOMODE,<auto_lidar_grip>,<slip_enabled>[,<force_hold_enabled>,<slip_sensor_mode>]
 //   CENTER
 // Telemetry emitted:
 //   FSR,<net0..2>,<raw0..2>,<state0..2>
@@ -59,10 +59,13 @@ constexpr uint16_t MIN_AUTO_GRIP_TIMEOUT_MS = 1000;
 constexpr uint16_t MAX_AUTO_GRIP_TIMEOUT_MS = 15000;
 constexpr int32_t CLOSING_EQUALIZE_BAND_ADC = 90;
 constexpr int32_t CLOSING_EQUALIZE_RESUME_ADC = 50;
-constexpr unsigned long HOLD_TIGHTEN_TIMEOUT_MS = 2500;
-constexpr unsigned long SLIP_SETTLE_MS = 240;
-constexpr unsigned long SLIP_CONFIRM_MS = 120;
-constexpr unsigned long SLIP_BOOST_INTERVAL_MS = 450;
+constexpr unsigned long FULL_MOTOR_SETTLE_MS = 220UL;
+constexpr unsigned long MICRO_PULSE_SETTLE_MS = 40UL;
+constexpr unsigned long ARM_MOVE_SLIP_SETTLE_MS = 260UL;
+constexpr uint16_t DEFAULT_SLIP_CONFIRM_MS = 350;
+constexpr uint16_t MIN_SLIP_CONFIRM_MS = 100;
+constexpr uint16_t MAX_SLIP_CONFIRM_MS = 2000;
+constexpr unsigned long SLIP_BOOST_INTERVAL_MS = 550;
 constexpr uint8_t DEFAULT_SLIP_TIGHTEN_SPEED_PCT = 14;
 constexpr uint8_t MIN_SLIP_TIGHTEN_SPEED_PCT = 8;
 constexpr uint8_t MAX_SLIP_TIGHTEN_SPEED_PCT = 60;
@@ -70,8 +73,13 @@ constexpr unsigned long CONTACT_CATCHUP_MAX_MS = 650;
 constexpr uint16_t STALL_ARM_MIN_FSR_ADC = 18;
 constexpr uint16_t STALL_WINDOW_ACTIVE_MS = 420;
 constexpr int32_t STALL_MIN_DELTA_ADC = 12;
-constexpr uint32_t MAX_FINGER_STROKE_MS = 2500;
+constexpr uint32_t MAX_FINGER_STROKE_MS = 4500;
 constexpr unsigned long POST_CONTACT_PERIOD_MS = 200;
+constexpr unsigned long OVER_RELEASE_PERIOD_MS = 260;
+constexpr unsigned long OVER_RELEASE_ON_MS = 18;
+constexpr uint16_t OVER_RELEASE_STALL_MS = 450;
+constexpr int32_t OVER_RELEASE_MIN_DROP_ADC = 12;
+constexpr unsigned long POST_SLIP_RELEASE_LOCKOUT_MS = 800;
 constexpr float FSR_EMA_ALPHA = 0.25f;
 constexpr int FSR_HYSTERESIS = 30;
 constexpr int FSR_MIN_THR = 10;
@@ -89,7 +97,7 @@ enum FsrState : uint8_t {
 constexpr uint8_t PAA5100_CS_PIN = 10;
 constexpr unsigned long OPTICAL_SAMPLE_MS = 50;
 constexpr unsigned long OPTICAL_HOLD_MS = 250;
-constexpr unsigned long OPTICAL_SLIP_HOLD_MS = 120;
+constexpr uint8_t MIN_OPT_SLIP_CONSECUTIVE_SAMPLES = 2;
 constexpr uint8_t OPTICAL_HIST_LEN = 4;
 constexpr float OPTICAL_EMA_ALPHA = 0.4f;
 constexpr int OPTICAL_MIN_MOTION_THR = 1;
@@ -110,8 +118,18 @@ constexpr float LIDAR_SPEED_EMA_ALPHA = 0.35f;
 constexpr float LIDAR_SPEED_DEADBAND_MM_S = 4.0f;
 constexpr uint16_t LIDAR_MIN_VALID_MM = 5;
 constexpr uint16_t LIDAR_MAX_VALID_MM = 1200;
-constexpr int LIDAR_SLIP_MIN_DISP_MM = 4;
+constexpr uint8_t MIN_LIDAR_SLIP_ACTIVE_FRAMES = 2;
+constexpr int LIDAR_SLIP_MIN_DISP_MM = 5;
 constexpr int LIDAR_REMOVAL_HYST_MM = 25;
+constexpr uint16_t DEFAULT_PALM_ZONE_MAX_MM = 45;
+constexpr uint16_t MIN_PALM_ZONE_MAX_MM = 15;
+constexpr uint16_t MAX_PALM_ZONE_MAX_MM = 200;
+
+enum SlipSensorMode : uint8_t {
+  SLIP_MODE_AUTO = 0,
+  SLIP_MODE_PALM_OPTICAL = 1,
+  SLIP_MODE_FINGERTIP_LIDAR = 2,
+};
 
 enum LidarState : uint8_t {
   LIDAR_CLEAR = 0,
@@ -198,6 +216,9 @@ int16_t optHistDy[OPTICAL_HIST_LEN] = {0, 0, 0, 0};
 uint8_t optHistHead = 0;
 uint8_t optHistCount = 0;
 bool optMotionActiveNow = false;
+uint8_t optActiveFrames = 0;
+unsigned long lastOptSlipFrameAt = 0;
+bool optMicroPulseSkipped = false;
 unsigned long lastOpticalSampleAt = 0;
 unsigned long lastOpticalMotionAt = 0;
 
@@ -213,6 +234,9 @@ float lidarHistDist[LIDAR_SPEED_WINDOW] = {0};
 unsigned long lidarHistTime[LIDAR_SPEED_WINDOW] = {0};
 uint8_t lidarHistHead = 0;
 uint8_t lidarHistCount = 0;
+uint8_t lidarActiveFrames = 0;
+unsigned long lastLidarSlipFrameAt = 0;
+bool lidarMicroPulseSkipped = false;
 unsigned long lastLidarPollAt = 0;
 unsigned long lastLidarSampleAt = 0;
 unsigned long lastLidarSlipAt = 0;
@@ -224,19 +248,24 @@ bool slipOpticalActive = false;
 bool slipLidarActive = false;
 bool slipArmed = false;
 unsigned long slipCandidateSince = 0;
+unsigned long holdZeroContactSince = 0;
+bool wasInSlipSettle = false;
 
 // Cascaded Two-Loop Smart Grip Controller state.
 uint8_t gripControllerState = GRIP_IDLE;
 bool autoLidarGripEnabled = false;
 bool slipDetectionEnabled = true;
 bool forceHoldEnabled = true;
+uint8_t slipSensorMode = SLIP_MODE_AUTO;
+uint16_t palmZoneMaxMm = DEFAULT_PALM_ZONE_MAX_MM;
 bool waitForObjectRemoval = false;
 uint16_t lidarTriggerMm = 60;
 uint16_t lidarDwellMs = 400;
-uint16_t lidarSlipVelocityThr = 40;
+uint16_t lidarSlipVelocityThr = 25;
 uint16_t releaseDurationMs = 1200;
 uint16_t slipBoostStep = 45;
 uint8_t slipTightenSpeedPct = DEFAULT_SLIP_TIGHTEN_SPEED_PCT;
+uint16_t slipConfirmMs = DEFAULT_SLIP_CONFIRM_MS;
 uint16_t forceHoldDeadband = 25;
 uint16_t slipForceBoost = 0;
 uint16_t gripHoldLidarMm = 0;
@@ -247,14 +276,15 @@ unsigned long firstContactAt = 0;
 unsigned long releaseStartedAt = 0;
 unsigned long lastTightenAt = 0;
 unsigned long lastSlipBoostAt = 0;
-unsigned long lastMotorMoveAt = 0;
+unsigned long lastFullMotorMoveAt = 0;
+unsigned long lastMicroPulseOnAt = 0;
+unsigned long lastArmServoMoveAt = 0;
 bool boostPendingTighten = false;
 bool closingContactStage = true;
 bool fingerAtTarget[FSR_COUNT] = {false, false, false};
 bool fingerParticipating[FSR_COUNT] = {true, true, true};
 bool fingerEqualizePaused[FSR_COUNT] = {false, false, false};
 uint16_t gripHoldBaseTarget[FSR_COUNT] = {600, 600, 600};
-unsigned long fingerTightenStartedAt[FSR_COUNT] = {0, 0, 0};
 uint32_t fingerStrokeMs[FSR_COUNT] = {0, 0, 0};
 uint16_t stallRefFsr[FSR_COUNT] = {0, 0, 0};
 uint16_t activePullAccumMs[FSR_COUNT] = {0, 0, 0};
@@ -262,6 +292,10 @@ bool fingerStalled[FSR_COUNT] = {false, false, false};
 bool fingerRegulating[FSR_COUNT] = {false, false, false};
 bool fingerMicroPulsing[FSR_COUNT] = {false, false, false};
 bool manualFingerClosing[FSR_COUNT] = {false, false, false};
+bool fingerReleasingOver[FSR_COUNT] = {false, false, false};
+uint16_t overReleaseRefFsr[FSR_COUNT] = {0, 0, 0};
+uint16_t activeReleaseAccumMs[FSR_COUNT] = {0, 0, 0};
+bool fingerReleaseStalled[FSR_COUNT] = {false, false, false};
 unsigned long postContactPulseOrigin = 0;
 
 unsigned long lastMotionUpdateAt = 0;
@@ -343,6 +377,17 @@ int calmSlipClosingAngleForFinger(int f, int32_t error, uint16_t refForce) {
   if (offset < 12) offset = 12;
   if (offset > 38) offset = 38;
   return fingerInvertClose[f] ? (DEFAULT_ANGLE - offset) : (DEFAULT_ANGLE + offset);
+}
+
+int calmOpeningAngleForFinger(int f, int32_t overAmount, uint16_t refForce) {
+  const float baseOffset = 9.0f + 0.35f * (float)slipTightenSpeedPct;
+  float ratio = (refForce > 0) ? ((float)overAmount / (float)refForce) : 0.3f;
+  if (ratio < 0.0f) ratio = 0.0f;
+  if (ratio > 1.0f) ratio = 1.0f;
+  int offset = (int)lroundf(baseOffset + 3.0f * ratio);
+  if (offset < 11) offset = 11;
+  if (offset > 24) offset = 24;
+  return fingerInvertClose[f] ? (DEFAULT_ANGLE + offset) : (DEFAULT_ANGLE - offset);
 }
 
 int proportionalClosingAngleForFinger(int f, int32_t error, uint16_t refForce) {
@@ -443,7 +488,45 @@ void resetOpticalMotionWindow() {
   optFilteredMag = 0.0f;
   optMag = 0;
   optMotionActiveNow = false;
+  optActiveFrames = 0;
+  lastOptSlipFrameAt = 0;
+  optMicroPulseSkipped = false;
   lastOpticalMotionAt = 0;
+}
+
+void resetLidarSlipWindow() {
+  lidarActiveFrames = 0;
+  lastLidarSlipFrameAt = 0;
+  lidarMicroPulseSkipped = false;
+  lidarVelEmaSignedMmS = 0.0f;
+  lidarSignedVelMmS = 0;
+  lidarVelocityMmS = 0;
+  lidarHistCount = 0;
+  lidarHistHead = 0;
+}
+
+bool isInFullSettleWindow(unsigned long now) {
+  if ((gripControllerState == GRIP_CLOSING) || (gripControllerState == GRIP_RELEASING)) {
+    return true;
+  }
+  for (uint8_t f = 0; f < FSR_COUNT; ++f) {
+    const int servoIdx = findServoIndex(CONTINUOUS_SERVO_FIRST_CHANNEL + f);
+    if (!fingerMicroPulsing[f] && servoIdx >= 0 && targets[servoIdx] != DEFAULT_ANGLE) {
+      return true;
+    }
+  }
+  if (lastFullMotorMoveAt != 0 && (now - lastFullMotorMoveAt < FULL_MOTOR_SETTLE_MS)) {
+    return true;
+  }
+  if (lastArmServoMoveAt != 0 && (now - lastArmServoMoveAt < ARM_MOVE_SLIP_SETTLE_MS)) {
+    return true;
+  }
+  return false;
+}
+
+bool isInSlipSettleWindow(unsigned long now) {
+  if (isInFullSettleWindow(now)) return true;
+  return lastMicroPulseOnAt != 0 && (now - lastMicroPulseOnAt < MICRO_PULSE_SETTLE_MS);
 }
 
 void setTarget(int index, int angle) {
@@ -456,12 +539,18 @@ void setTarget(int index, int angle) {
     Serial.println(fsrNet[f]);
   }
   const bool firstPositionalSet = !isContinuousServo(index) && !servoPositionValid[index];
+  const bool armMoved = !isContinuousServo(index) && !firstPositionalSet && (targets[index] != angle);
+  const bool continuousFingerStopped =
+      (f >= 0) && (angle == DEFAULT_ANGLE) && !fingerMicroPulsing[f] && (targets[index] != DEFAULT_ANGLE);
   if (!isContinuousServo(index)) {
     servoPositionValid[index] = true;
   }
   targets[index] = angle;
-  if (f >= 0 && angle != DEFAULT_ANGLE) {
-    lastMotorMoveAt = millis();
+  if (armMoved) {
+    lastArmServoMoveAt = millis();
+  }
+  if (f >= 0 && (angle != DEFAULT_ANGLE || continuousFingerStopped)) {
+    lastFullMotorMoveAt = millis();
   }
   // Write immediately on first positional sync/boot command, continuous stops, or unprofiled servos.
   if (firstPositionalSet ||
@@ -475,7 +564,9 @@ void stopFingerPostContact(uint8_t f, int servoIdx, unsigned long now) {
   if (f >= FSR_COUNT || servoIdx < 0) return;
   const bool wasMicroPulsing = fingerMicroPulsing[f];
   fingerMicroPulsing[f] = false;
+  fingerReleasingOver[f] = false;
   activePullAccumMs[f] = 0;
+  activeReleaseAccumMs[f] = 0;
   bool anyPulsing = false;
   for (uint8_t k = 0; k < FSR_COUNT; ++k) {
     if (fingerMicroPulsing[k]) {
@@ -492,26 +583,23 @@ void stopFingerPostContact(uint8_t f, int servoIdx, unsigned long now) {
     targets[servoIdx] = DEFAULT_ANGLE;
     writeTargetImmediately(servoIdx);
     printPosition("ACK", servoIdx);
-    lastMotorMoveAt = now;
+    lastFullMotorMoveAt = now;
   }
 }
 
-void applyPostContactMicroPulse(uint8_t f, int servoIdx, int desiredAngle, unsigned long now) {
+void applyMicroPulseWindow(uint8_t f, int servoIdx, int desiredAngle, unsigned long periodMs,
+                           unsigned long onMs, bool checkGripLimit, unsigned long now) {
   if (f >= FSR_COUNT || servoIdx < 0) return;
   if (desiredAngle == DEFAULT_ANGLE) {
     stopFingerPostContact(f, servoIdx, now);
     return;
   }
-  int onMsInt = 40 + (int)slipTightenSpeedPct;
-  if (onMsInt < 45) onMsInt = 45;
-  if (onMsInt > 90) onMsInt = 90;
-  const unsigned long onMs = (unsigned long)onMsInt;
   if (postContactPulseOrigin == 0) {
     postContactPulseOrigin = now;
   }
-  const unsigned long phaseMs = (now - postContactPulseOrigin) % POST_CONTACT_PERIOD_MS;
+  const unsigned long phaseMs = (now - postContactPulseOrigin) % periodMs;
   if (phaseMs < onMs) {
-    if (fsrGuardEnabled && isFingerAtGripLimit(f)) {
+    if (checkGripLimit && fsrGuardEnabled && isFingerAtGripLimit(f)) {
       stopFingerPostContact(f, servoIdx, now);
       return;
     }
@@ -521,16 +609,60 @@ void applyPostContactMicroPulse(uint8_t f, int servoIdx, int desiredAngle, unsig
     currentAngles[servoIdx] = (float)desiredAngle;
     currentVelocities[servoIdx] = 0.0f;
     writePulseForAngle(servoIdx, (float)desiredAngle);
-    lastMotorMoveAt = now;
+    lastMicroPulseOnAt = now;
     if (emitAck) {
       printPosition("ACK", servoIdx);
     }
   } else {
+    const bool wasContinuous = !fingerMicroPulsing[f] && (targets[servoIdx] != DEFAULT_ANGLE);
+    fingerMicroPulsing[f] = true;
     targets[servoIdx] = DEFAULT_ANGLE;
     currentAngles[servoIdx] = DEFAULT_ANGLE;
     currentVelocities[servoIdx] = 0.0f;
     stopContinuousServo(servoIdx);
-    lastMotorMoveAt = now;
+    if (wasContinuous) {
+      printPosition("ACK", servoIdx);
+    }
+  }
+}
+
+void applyPostContactMicroPulse(uint8_t f, int servoIdx, int desiredAngle, unsigned long now) {
+  int onMsInt = 40 + (int)slipTightenSpeedPct;
+  if (onMsInt < 45) onMsInt = 45;
+  if (onMsInt > 90) onMsInt = 90;
+  if (gripControllerState == GRIP_HOLDING &&
+      fsrEnabled[f] &&
+      fsrNet[f] < (fsrContactThreshold[f] / 2)) {
+    if (onMsInt < 72) onMsInt = 72;
+    if (desiredAngle != DEFAULT_ANGLE) {
+      int offset = abs(desiredAngle - DEFAULT_ANGLE) + 6;
+      if (offset > 42) offset = 42;
+      desiredAngle = fingerInvertClose[f] ? (DEFAULT_ANGLE - offset) : (DEFAULT_ANGLE + offset);
+    }
+  }
+  applyMicroPulseWindow(
+      f, servoIdx, desiredAngle, POST_CONTACT_PERIOD_MS, (unsigned long)onMsInt, true, now);
+}
+
+void applyOverTargetReleaseMicroPulse(uint8_t f, int servoIdx, int desiredOpenAngle, unsigned long now) {
+  applyMicroPulseWindow(
+      f, servoIdx, desiredOpenAngle, OVER_RELEASE_PERIOD_MS, OVER_RELEASE_ON_MS, false, now);
+}
+
+void driveFingerTowardContact(uint8_t f, int servoIdx, int continuousAngle, bool forceAck,
+                              unsigned long now) {
+  const uint16_t softPreTouch =
+      (fsrContactThreshold[f] / 4 > 18) ? (fsrContactThreshold[f] / 4) : 18;
+  if (fsrNet[f] >= softPreTouch) {
+    const int cmd = calmSlipClosingAngleForFinger(
+        f, (int32_t)fsrContactThreshold[f] - (int32_t)fsrNet[f], fsrContactThreshold[f]);
+    applyPostContactMicroPulse(f, servoIdx, cmd, now);
+  } else {
+    fingerMicroPulsing[f] = false;
+    if (forceAck || targets[servoIdx] != continuousAngle) {
+      setTarget(servoIdx, continuousAngle);
+      printPosition("ACK", servoIdx);
+    }
   }
 }
 
@@ -539,14 +671,16 @@ void stopAllContinuousServosWithAck(unsigned long now) {
   for (uint8_t f = 0; f < FSR_COUNT; ++f) {
     fingerMicroPulsing[f] = false;
     fingerRegulating[f] = false;
+    fingerReleasingOver[f] = false;
     activePullAccumMs[f] = 0;
+    activeReleaseAccumMs[f] = 0;
     const int servoIdx = findServoIndex(CONTINUOUS_SERVO_FIRST_CHANNEL + f);
     if (servoIdx < 0) continue;
     targets[servoIdx] = DEFAULT_ANGLE;
     writeTargetImmediately(servoIdx);
     printPosition("ACK", servoIdx);
   }
-  lastMotorMoveAt = now;
+  lastFullMotorMoveAt = now;
 }
 
 void stopAllFingerPostContact(unsigned long now) {
@@ -564,7 +698,15 @@ void cancelSmartController() {
   lastSlipBoostAt = 0;
   gripHoldLidarMm = 0;
   slipCandidateSince = 0;
+  holdZeroContactSince = 0;
   slipArmed = false;
+  wasInSlipSettle = false;
+  optActiveFrames = 0;
+  lastOptSlipFrameAt = 0;
+  optMicroPulseSkipped = false;
+  lidarActiveFrames = 0;
+  lastLidarSlipFrameAt = 0;
+  lidarMicroPulseSkipped = false;
   firstContactAt = 0;
   closingContactStage = true;
   boostPendingTighten = false;
@@ -574,12 +716,15 @@ void cancelSmartController() {
     fingerParticipating[f] = true;
     fingerEqualizePaused[f] = false;
     gripHoldBaseTarget[f] = closingTargetForceForFinger(f);
-    fingerTightenStartedAt[f] = 0;
     fingerRegulating[f] = false;
     fingerMicroPulsing[f] = false;
     manualFingerClosing[f] = false;
     activePullAccumMs[f] = 0;
     stallRefFsr[f] = 0;
+    fingerReleasingOver[f] = false;
+    overReleaseRefFsr[f] = 0;
+    activeReleaseAccumMs[f] = 0;
+    fingerReleaseStalled[f] = false;
   }
 }
 
@@ -711,14 +856,20 @@ void sampleFsrSensors(unsigned long now, bool forceImmediate) {
         Serial.println(fsrNet[f]);
       }
     } else {
-      const uint32_t dec = (FSR_SAMPLE_MS * (uint32_t)w * 150UL) / 10000UL;
+      const uint32_t dec = (FSR_SAMPLE_MS * (uint32_t)w * 250UL) / 10000UL;
       fingerStrokeMs[f] = (fingerStrokeMs[f] > dec) ? (fingerStrokeMs[f] - dec) : 0;
-      fingerStalled[f] = false;
+      if (fingerStrokeMs[f] < MAX_FINGER_STROKE_MS) {
+        fingerStalled[f] = false;
+      }
     }
   }
 
-  // (B) Force-Progress / Stall Watchdog for enabled FSR fingers.
+  // (B) Force-Progress / Stall Watchdog for enabled FSR fingers (disabled during GRIP_HOLDING).
   for (uint8_t f = 0; f < FSR_COUNT; ++f) {
+    if (gripControllerState == GRIP_HOLDING) {
+      activePullAccumMs[f] = 0;
+      continue;
+    }
     if (!fsrEnabled[f]) {
       activePullAccumMs[f] = 0;
       continue;
@@ -729,19 +880,19 @@ void sampleFsrSensors(unsigned long now, bool forceImmediate) {
       continue;
     }
     const int curAngle = (int)lroundf(currentAngles[servoIdx]);
-    const bool activelyClosing =
+    const bool pwmActive =
         (lastPulseUs[servoIdx] != PULSE_FULL_OFF) &&
-        (lastPulseUs[servoIdx] != PULSE_UNSET) &&
-        isFingerClosing(f, curAngle);
+        (lastPulseUs[servoIdx] != PULSE_UNSET);
+    const bool activelyClosing = pwmActive && isFingerClosing(f, curAngle);
+    const bool activelyOpening = pwmActive && (curAngle != DEFAULT_ANGLE) && !isFingerClosing(f, curAngle);
     const bool guardActive = (fsrGuardEnabled || gripControllerState != GRIP_IDLE);
-    if (!guardActive || (!activelyClosing && !fingerMicroPulsing[f])) {
+    if (!guardActive || fingerReleasingOver[f] || activelyOpening || (!activelyClosing && !fingerMicroPulsing[f])) {
       activePullAccumMs[f] = 0;
       continue;
     }
     const bool armed =
         (fsrNet[f] >= STALL_ARM_MIN_FSR_ADC) ||
-        (gripControllerState == GRIP_CLOSING && !closingContactStage) ||
-        (gripControllerState == GRIP_HOLDING);
+        (gripControllerState == GRIP_CLOSING && !closingContactStage);
     if (!armed) {
       activePullAccumMs[f] = 0;
       continue;
@@ -767,13 +918,53 @@ void sampleFsrSensors(unsigned long now, bool forceImmediate) {
       activePullAccumMs[f] = 0;
       fingerRegulating[f] = false;
       fingerAtTarget[f] = true;
-      if (gripControllerState == GRIP_HOLDING && fsrNet[f] < gripHoldBaseTarget[f]) {
-        gripHoldBaseTarget[f] = fsrNet[f];
-      }
       Serial.print("STALL,");
       Serial.print(f);
       Serial.print(',');
       Serial.println(fsrNet[f]);
+    }
+  }
+
+  // (C) Over-Release Progress Guard for enabled FSR fingers.
+  for (uint8_t f = 0; f < FSR_COUNT; ++f) {
+    if (!fsrEnabled[f] || gripControllerState != GRIP_HOLDING) {
+      fingerReleasingOver[f] = false;
+      activeReleaseAccumMs[f] = 0;
+      continue;
+    }
+    if (!fingerReleasingOver[f]) {
+      activeReleaseAccumMs[f] = 0;
+      if (fingerReleaseStalled[f] &&
+          (int32_t)fsrNet[f] - (int32_t)overReleaseRefFsr[f] >= 35) {
+        fingerReleaseStalled[f] = false;
+      }
+      continue;
+    }
+    const int servoIdx = findServoIndex(CONTINUOUS_SERVO_FIRST_CHANNEL + f);
+    if (servoIdx < 0) {
+      fingerReleasingOver[f] = false;
+      activeReleaseAccumMs[f] = 0;
+      continue;
+    }
+    if ((int32_t)overReleaseRefFsr[f] - (int32_t)fsrNet[f] >= OVER_RELEASE_MIN_DROP_ADC) {
+      overReleaseRefFsr[f] = fsrNet[f];
+      activeReleaseAccumMs[f] = 0;
+      continue;
+    }
+    const int curAngle = (int)lroundf(currentAngles[servoIdx]);
+    const bool activelyOpening =
+        (lastPulseUs[servoIdx] != PULSE_FULL_OFF) &&
+        (lastPulseUs[servoIdx] != PULSE_UNSET) &&
+        (curAngle != DEFAULT_ANGLE) &&
+        !isFingerClosing(f, curAngle);
+    if (!activelyOpening) continue;
+
+    activeReleaseAccumMs[f] += (uint16_t)FSR_SAMPLE_MS;
+    if (activeReleaseAccumMs[f] >= OVER_RELEASE_STALL_MS) {
+      stopFingerPostContact(f, servoIdx, now);
+      fingerReleasingOver[f] = false;
+      fingerReleaseStalled[f] = true;
+      activeReleaseAccumMs[f] = 0;
     }
   }
 }
@@ -828,30 +1019,43 @@ bool initOpticalSensor() {
   return true;
 }
 
-void evaluateOpticalState(unsigned long now, float rawMag, float vecMag) {
+void evaluateOpticalState(unsigned long now, float rawMag, float vecMag,
+                          bool hadMicroPulseSkip = false) {
   if (!opticalSensorOnline) {
     optState = OPT_OFFLINE;
     optMotionActiveNow = false;
+    optActiveFrames = 0;
+    lastOptSlipFrameAt = 0;
     return;
   }
   if (optSqualThreshold > 0 && optSqual < optSqualThreshold) {
     optState = OPT_LOW_SQUAL;
     optMotionActiveNow = false;
+    optActiveFrames = 0;
+    lastOptSlipFrameAt = 0;
     return;
   }
-  // Directional vector accumulation rejects stationary back-and-forth jitter
-  // while accumulating slow, consistent slip; fast single spikes trigger at +1 margin.
-  const bool aboveThreshold =
-      (vecMag >= (float)optMotionThreshold) ||
-      (rawMag >= (float)(optMotionThreshold + 1));
-  optMotionActiveNow = aboveThreshold;
-  if (aboveThreshold) {
+  if (!hadMicroPulseSkip && lastOptSlipFrameAt != 0 && (now - lastOptSlipFrameAt > 115UL)) {
+    optActiveFrames = 0;
+  }
+  const bool frameMoved =
+      (rawMag >= (float)optMotionThreshold) || (vecMag >= (float)(optMotionThreshold + 1));
+  if (frameMoved) {
+    if (optActiveFrames < 20) ++optActiveFrames;
+    lastOptSlipFrameAt = now;
+    optMotionActiveNow = true;
     lastOpticalMotionAt = now;
     optState = OPT_MOVEMENT;
-  } else if (lastOpticalMotionAt != 0 && (now - lastOpticalMotionAt < OPTICAL_HOLD_MS)) {
-    optState = OPT_MOVEMENT;
   } else {
-    optState = OPT_STILL;
+    optMotionActiveNow = false;
+    if (!hadMicroPulseSkip && lastOptSlipFrameAt != 0 && (now - lastOptSlipFrameAt > 115UL)) {
+      optActiveFrames = 0;
+      lastOptSlipFrameAt = 0;
+    }
+    // OPTICAL_HOLD_MS is ONLY for the visual badge, NEVER for optFreshSlip.
+    optState = (lastOpticalMotionAt != 0 && (now - lastOpticalMotionAt < OPTICAL_HOLD_MS))
+                   ? OPT_MOVEMENT
+                   : OPT_STILL;
   }
 }
 
@@ -861,6 +1065,9 @@ void sampleOpticalSensor(unsigned long now) {
   if (!opticalSensorOnline) {
     optState = OPT_OFFLINE;
     optMotionActiveNow = false;
+    optActiveFrames = 0;
+    lastOptSlipFrameAt = 0;
+    optMicroPulseSkipped = false;
     return;
   }
 
@@ -869,7 +1076,27 @@ void sampleOpticalSensor(unsigned long now) {
   flow.readMotionCount(&dx, &dy);
   if (optSqualThreshold > 0) {
     optSqual = paaReadReg(0x07);
+  } else {
+    optSqual = 0;
   }
+
+  if (isInFullSettleWindow(now)) {
+    resetOpticalMotionWindow();
+    optState = (optSqualThreshold > 0 && optSqual < optSqualThreshold) ? OPT_LOW_SQUAL : OPT_STILL;
+    optMag = 0;
+    optAccumX = 0;
+    optAccumY = 0;
+    return;
+  }
+
+  if (isInSlipSettleWindow(now)) {
+    // Micro-pulse ON + 40 ms settle: dx/dy already read & discarded; keep optActiveFrames intact.
+    optMicroPulseSkipped = true;
+    return;
+  }
+
+  const bool hadMicroPulseSkip = optMicroPulseSkipped;
+  optMicroPulseSkipped = false;
 
   optAccumX += dx;
   optAccumY += dy;
@@ -893,7 +1120,7 @@ void sampleOpticalSensor(unsigned long now) {
   optFilteredMag = (OPTICAL_EMA_ALPHA * vecMag) +
                    ((1.0f - OPTICAL_EMA_ALPHA) * optFilteredMag);
   optMag = (uint16_t)lroundf(fmaxf(rawMag, fmaxf(vecMag, optFilteredMag)));
-  evaluateOpticalState(now, rawMag, vecMag);
+  evaluateOpticalState(now, rawMag, vecMag, hadMicroPulseSkip);
 }
 
 bool initLidarSensor() {
@@ -907,10 +1134,7 @@ bool initLidarSensor() {
     lidarOnline = false;
     lidarValid = false;
     lidarDistanceMm = 0;
-    lidarSignedVelMmS = 0;
-    lidarVelocityMmS = 0;
-    lidarHistCount = 0;
-    lidarHistHead = 0;
+    resetLidarSlipWindow();
     lidarState = LIDAR_OFFLINE;
     return false;
   }
@@ -920,11 +1144,7 @@ bool initLidarSensor() {
   lidarValid = false;
   lidarDistanceMm = 0;
   lidarFilteredMm = 0.0f;
-  lidarVelEmaSignedMmS = 0.0f;
-  lidarSignedVelMmS = 0;
-  lidarVelocityMmS = 0;
-  lidarHistCount = 0;
-  lidarHistHead = 0;
+  resetLidarSlipWindow();
   lidarState = LIDAR_CLEAR;
   return true;
 }
@@ -978,31 +1198,62 @@ void sampleLidarSensor(unsigned long now) {
     const float rawDist = (float)results.distance_mm;
     if (!lidarValid || lastLidarSampleAt == 0) {
       lidarFilteredMm = rawDist;
-      lidarVelEmaSignedMmS = 0.0f;
-      lidarHistCount = 0;
-      lidarHistHead = 0;
+      resetLidarSlipWindow();
     } else {
       lidarFilteredMm = (0.45f * rawDist) + (0.55f * lidarFilteredMm);
     }
 
-    lidarHistDist[lidarHistHead] = rawDist;
-    lidarHistTime[lidarHistHead] = now;
-    lidarHistHead = (lidarHistHead + 1) % LIDAR_SPEED_WINDOW;
-    if (lidarHistCount < LIDAR_SPEED_WINDOW) ++lidarHistCount;
-
-    const float slope = lidarSlopeMmPerSecond();
-    lidarVelEmaSignedMmS = (LIDAR_SPEED_EMA_ALPHA * slope) +
-                           ((1.0f - LIDAR_SPEED_EMA_ALPHA) * lidarVelEmaSignedMmS);
-    if (fabsf(lidarVelEmaSignedMmS) < LIDAR_SPEED_DEADBAND_MM_S) {
-      lidarSignedVelMmS = 0;
-    } else {
-      lidarSignedVelMmS = (int16_t)lroundf(lidarVelEmaSignedMmS);
-    }
-
     lidarValid = true;
     lidarDistanceMm = (uint16_t)lroundf(lidarFilteredMm);
-    lidarVelocityMmS = (uint16_t)abs((int)lidarSignedVelMmS);
     lastLidarSampleAt = now;
+
+    if (isInFullSettleWindow(now)) {
+      resetLidarSlipWindow();
+      if (gripControllerState == GRIP_HOLDING) {
+        gripHoldLidarMm = lidarDistanceMm;
+      }
+    } else if (isInSlipSettleWindow(now)) {
+      // Micro-pulse ON + 40 ms settle: keep distance fresh without corrupting slope/frame window.
+      lidarMicroPulseSkipped = true;
+    } else {
+      const bool hadMicroPulseSkip = lidarMicroPulseSkipped;
+      lidarMicroPulseSkipped = false;
+
+      lidarHistDist[lidarHistHead] = rawDist;
+      lidarHistTime[lidarHistHead] = now;
+      lidarHistHead = (lidarHistHead + 1) % LIDAR_SPEED_WINDOW;
+      if (lidarHistCount < LIDAR_SPEED_WINDOW) ++lidarHistCount;
+
+      const float slope = lidarSlopeMmPerSecond();
+      lidarVelEmaSignedMmS = (LIDAR_SPEED_EMA_ALPHA * slope) +
+                             ((1.0f - LIDAR_SPEED_EMA_ALPHA) * lidarVelEmaSignedMmS);
+      if (fabsf(lidarVelEmaSignedMmS) < LIDAR_SPEED_DEADBAND_MM_S) {
+        lidarSignedVelMmS = 0;
+      } else {
+        lidarSignedVelMmS = (int16_t)lroundf(lidarVelEmaSignedMmS);
+      }
+      lidarVelocityMmS = (uint16_t)abs((int)lidarSignedVelMmS);
+
+      if (gripControllerState == GRIP_HOLDING && gripHoldLidarMm > 0) {
+        if (!hadMicroPulseSkip && lastLidarSlipFrameAt != 0 && (now - lastLidarSlipFrameAt > 150UL)) {
+          lidarActiveFrames = 0;
+        }
+        const int disp = abs((int)lidarDistanceMm - (int)gripHoldLidarMm);
+        const bool lidarMoved =
+            (lidarVelocityMmS >= lidarSlipVelocityThr && disp >= LIDAR_SLIP_MIN_DISP_MM) ||
+            (disp >= 9 && lidarVelocityMmS >= 12);
+        if (lidarMoved) {
+          if (lidarActiveFrames < 20) ++lidarActiveFrames;
+          lastLidarSlipFrameAt = now;
+        } else if (!hadMicroPulseSkip && lastLidarSlipFrameAt != 0 && (now - lastLidarSlipFrameAt > 150UL)) {
+          lidarActiveFrames = 0;
+          lastLidarSlipFrameAt = 0;
+        }
+      } else {
+        lidarActiveFrames = 0;
+        lastLidarSlipFrameAt = 0;
+      }
+    }
   } else {
     lidarValid = false;
     lidarVelEmaSignedMmS *= 0.5f;
@@ -1010,6 +1261,9 @@ void sampleLidarSensor(unsigned long now) {
     lidarVelocityMmS = 0;
     lidarHistCount = 0;
     lidarHistHead = 0;
+    lidarActiveFrames = 0;
+    lastLidarSlipFrameAt = 0;
+    lidarMicroPulseSkipped = false;
   }
 
   if (lastLidarSlipAt != 0 && (now - lastLidarSlipAt < LIDAR_SLIP_HOLD_MS)) {
@@ -1029,24 +1283,32 @@ void updateSlipDetection(unsigned long now) {
     slipConfidence = 0;
     slipState = SLIP_DISABLED;
     slipCandidateSince = 0;
+    holdZeroContactSince = 0;
+    wasInSlipSettle = false;
+    optActiveFrames = 0;
+    lastOptSlipFrameAt = 0;
+    optMicroPulseSkipped = false;
+    lidarActiveFrames = 0;
+    lastLidarSlipFrameAt = 0;
+    lidarMicroPulseSkipped = false;
     return;
   }
 
-  bool anyMoving = (gripControllerState == GRIP_CLOSING) || (gripControllerState == GRIP_RELEASING);
-  for (uint8_t f = 0; f < FSR_COUNT; ++f) {
-    if (fingerMicroPulsing[f]) {
-      anyMoving = true;
-      break;
-    }
-    const int servoIdx = findServoIndex(CONTINUOUS_SERVO_FIRST_CHANNEL + f);
-    if (servoIdx >= 0 && targets[servoIdx] != DEFAULT_ANGLE) {
-      anyMoving = true;
-      break;
+  bool anyFullMoving = (gripControllerState == GRIP_RELEASING);
+  if (!anyFullMoving) {
+    for (uint8_t f = 0; f < FSR_COUNT; ++f) {
+      const int servoIdx = findServoIndex(CONTINUOUS_SERVO_FIRST_CHANNEL + f);
+      if (!fingerMicroPulsing[f] && servoIdx >= 0 && targets[servoIdx] != DEFAULT_ANGLE) {
+        anyFullMoving = true;
+        break;
+      }
     }
   }
-  if (anyMoving) {
-    lastMotorMoveAt = now;
+  if (anyFullMoving) {
+    lastFullMotorMoveAt = now;
   }
+  const bool inFullSettle = isInFullSettleWindow(now);
+  const bool inMicroSettle = !inFullSettle && isInSlipSettleWindow(now);
 
   uint8_t enabledFsrCount = 0;
   for (uint8_t f = 0; f < FSR_COUNT; ++f) {
@@ -1055,19 +1317,29 @@ void updateSlipDetection(unsigned long now) {
 
   if (enabledFsrCount == 0) {
     slipArmed = false;
+    holdZeroContactSince = 0;
   } else if (gripControllerState == GRIP_HOLDING) {
-    bool anyHoldContact = false;
+    bool anyParticipatingAboveZero = false;
+    uint8_t participatingEnabledCount = 0;
     for (uint8_t f = 0; f < FSR_COUNT; ++f) {
       if (!fsrEnabled[f] || !fingerParticipating[f]) continue;
-      const uint16_t contactFloor =
-          (fsrContactThreshold[f] / 3 > 10) ? (fsrContactThreshold[f] / 3) : 10;
-      if (fsrState[f] != FSR_SENSOR_ERROR && fsrNet[f] >= contactFloor) {
-        anyHoldContact = true;
+      ++participatingEnabledCount;
+      if (fsrState[f] != FSR_SENSOR_ERROR && fsrNet[f] >= 8) {
+        anyParticipatingAboveZero = true;
         break;
       }
     }
-    slipArmed = anyHoldContact;
+    if (participatingEnabledCount == 0 || anyParticipatingAboveZero) {
+      holdZeroContactSince = 0;
+      slipArmed = true;
+    } else {
+      if (holdZeroContactSince == 0) {
+        holdZeroContactSince = now;
+      }
+      slipArmed = (now - holdZeroContactSince < 1500UL);
+    }
   } else if (gripControllerState == GRIP_IDLE) {
+    holdZeroContactSince = 0;
     bool allIdleContact = true;
     for (uint8_t f = 0; f < FSR_COUNT; ++f) {
       if (!fsrEnabled[f]) continue;
@@ -1083,20 +1355,43 @@ void updateSlipDetection(unsigned long now) {
     }
     slipArmed = allIdleContact;
   } else {
+    holdZeroContactSince = 0;
     slipArmed = false;
   }
 
   const bool opticalAvailable = opticalSensorOnline && (optState != OPT_LOW_SQUAL) && (optState != OPT_OFFLINE);
   const bool lidarAvailable = lidarOnline && lidarValid;
-  const bool optFreshSlip = opticalAvailable &&
-                            (optMotionActiveNow || (lastOpticalMotionAt != 0 && (now - lastOpticalMotionAt <= OPTICAL_SLIP_HOLD_MS)));
-  const bool lidarDispOk = !slipArmed || (gripHoldLidarMm == 0) ||
-                           (abs((int)lidarDistanceMm - (int)gripHoldLidarMm) >= LIDAR_SLIP_MIN_DISP_MM);
-  const bool lidarFreshSlip = lidarAvailable &&
-                              (lidarVelocityMmS >= lidarSlipVelocityThr) &&
-                              lidarDispOk;
 
-  if (!opticalAvailable && !lidarAvailable) {
+  bool allowOptical = false;
+  bool allowLidar = false;
+  if (slipSensorMode == SLIP_MODE_PALM_OPTICAL) {
+    allowOptical = true;
+    allowLidar = false;
+  } else if (slipSensorMode == SLIP_MODE_FINGERTIP_LIDAR) {
+    allowOptical = false;
+    allowLidar = true;
+  } else {
+    const uint16_t zoneRefMm =
+        (gripControllerState == GRIP_HOLDING && gripHoldLidarMm > 0)
+            ? gripHoldLidarMm
+            : lidarDistanceMm;
+    if (!lidarOnline || !lidarValid || zoneRefMm == 0 || zoneRefMm <= palmZoneMaxMm) {
+      allowOptical = true;
+      allowLidar = false;
+    } else {
+      allowOptical = false;
+      allowLidar = true;
+    }
+  }
+
+  if (!(allowOptical && opticalAvailable) && !(allowLidar && lidarAvailable)) {
+    if (inFullSettle) {
+      wasInSlipSettle = true;
+    } else if (wasInSlipSettle) {
+      wasInSlipSettle = false;
+      resetOpticalMotionWindow();
+      resetLidarSlipWindow();
+    }
     slipOpticalActive = false;
     slipLidarActive = false;
     slipConfidence = 0;
@@ -1105,50 +1400,114 @@ void updateSlipDetection(unsigned long now) {
     return;
   }
 
-  if (!slipArmed) {
-    slipOpticalActive = optFreshSlip;
-    slipLidarActive = lidarFreshSlip;
-    slipConfidence = 0;
-    slipCandidateSince = 0;
-    slipState = (!anyMoving && (slipOpticalActive || slipLidarActive))
-                    ? SLIP_UNLOADED_MOTION
-                    : SLIP_WAITING_FOR_FSR;
-    return;
-  }
-
-  const bool inSettle = anyMoving || (lastMotorMoveAt != 0 && (now - lastMotorMoveAt < SLIP_SETTLE_MS));
-  if (inSettle) {
+  if (inFullSettle) {
+    wasInSlipSettle = true;
     if (lidarAvailable && gripControllerState == GRIP_HOLDING) {
       gripHoldLidarMm = lidarDistanceMm;
     }
     slipOpticalActive = false;
     slipLidarActive = false;
     slipConfidence = 0;
-    slipState = SLIP_STABLE;
+    slipState = slipArmed ? SLIP_STABLE : SLIP_WAITING_FOR_FSR;
     slipCandidateSince = 0;
     return;
   }
 
-  slipOpticalActive = optFreshSlip;
-  slipLidarActive = lidarFreshSlip;
-  slipConfidence = (slipOpticalActive ? 60 : 0) + (slipLidarActive ? 40 : 0);
-  if (!slipOpticalActive && !slipLidarActive) {
-    slipState = SLIP_STABLE;
+  if (wasInSlipSettle) {
+    wasInSlipSettle = false;
+    resetOpticalMotionWindow();
+    resetLidarSlipWindow();
+    if (lidarAvailable && gripControllerState == GRIP_HOLDING) {
+      gripHoldLidarMm = lidarDistanceMm;
+    }
+  }
+
+  if (inMicroSettle) {
+    if (!slipArmed) {
+      slipOpticalActive = false;
+      slipLidarActive = false;
+      slipConfidence = 0;
+      slipCandidateSince = 0;
+      slipState = SLIP_WAITING_FOR_FSR;
+    }
+    return;
+  }
+
+  const bool waitingPostPulseSample =
+      (slipCandidateSince != 0) &&
+      (lastMicroPulseOnAt != 0) &&
+      (now - lastMicroPulseOnAt < MICRO_PULSE_SETTLE_MS + 65UL) &&
+      ((allowOptical && opticalAvailable && optMicroPulseSkipped) ||
+       (allowLidar && lidarAvailable && lidarMicroPulseSkipped));
+  if (waitingPostPulseSample) {
+    if (!slipArmed) {
+      slipOpticalActive = false;
+      slipLidarActive = false;
+      slipConfidence = 0;
+      slipCandidateSince = 0;
+      slipState = SLIP_WAITING_FOR_FSR;
+    }
+    return;
+  }
+
+  const bool optFreshSlip =
+      opticalAvailable &&
+      (optActiveFrames >= MIN_OPT_SLIP_CONSECUTIVE_SAMPLES) &&
+      (lastOptSlipFrameAt != 0 && (now - lastOptSlipFrameAt <= 95UL));
+  const bool lidarFreshSlip =
+      lidarAvailable &&
+      (lidarActiveFrames >= MIN_LIDAR_SLIP_ACTIVE_FRAMES) &&
+      (lastLidarSlipFrameAt != 0 && (now - lastLidarSlipFrameAt <= 130UL));
+
+  if (!slipArmed) {
+    slipOpticalActive = allowOptical && optFreshSlip;
+    slipLidarActive = allowLidar && lidarFreshSlip;
+    slipConfidence = 0;
     slipCandidateSince = 0;
+    slipState = (slipOpticalActive || slipLidarActive)
+                    ? SLIP_UNLOADED_MOTION
+                    : SLIP_WAITING_FOR_FSR;
+    return;
+  }
+
+  slipOpticalActive = allowOptical && optFreshSlip;
+  slipLidarActive = allowLidar && lidarFreshSlip;
+  if (!slipOpticalActive && !slipLidarActive) {
+    const bool optBridging =
+        allowOptical && opticalAvailable &&
+        (optActiveFrames >= MIN_OPT_SLIP_CONSECUTIVE_SAMPLES) &&
+        (lastOptSlipFrameAt != 0 && (now - lastOptSlipFrameAt <= 115UL));
+    const bool lidarBridging =
+        allowLidar && lidarAvailable &&
+        (lidarActiveFrames >= MIN_LIDAR_SLIP_ACTIVE_FRAMES) &&
+        (lastLidarSlipFrameAt != 0 && (now - lastLidarSlipFrameAt <= 150UL));
+    if (!optBridging && !lidarBridging) {
+      slipCandidateSince = 0;
+    }
+    slipConfidence = 0;
+    slipState = SLIP_STABLE;
     return;
   }
 
   if (slipCandidateSince == 0) {
     slipCandidateSince = now;
   }
-  if (now - slipCandidateSince < SLIP_CONFIRM_MS) {
+  const unsigned long elapsed = now - slipCandidateSince;
+  const unsigned long confirmNeedMs = (unsigned long)slipConfirmMs;
+  if (elapsed < confirmNeedMs) {
     slipState = SLIP_SUSPECTED;
-  } else if (slipOpticalActive && slipLidarActive) {
-    slipState = SLIP_CORROBORATED;
-  } else if (slipOpticalActive) {
-    slipState = SLIP_OPTICAL_CONFIRMED;
+    uint32_t pct = 5UL + (elapsed * 90UL) / ((confirmNeedMs > 0) ? confirmNeedMs : 1UL);
+    if (pct > 95UL) pct = 95UL;
+    slipConfidence = (uint8_t)pct;
   } else {
-    slipState = SLIP_LIDAR_CONFIRMED;
+    slipConfidence = 100;
+    if (slipOpticalActive && slipLidarActive) {
+      slipState = SLIP_CORROBORATED;
+    } else if (slipOpticalActive) {
+      slipState = SLIP_OPTICAL_CONFIRMED;
+    } else {
+      slipState = SLIP_LIDAR_CONFIRMED;
+    }
   }
 }
 
@@ -1157,12 +1516,21 @@ void finalizeGripHoldingTransition(unsigned long now) {
   slipForceBoost = 0;
   boostPendingTighten = false;
   slipCandidateSince = 0;
+  holdZeroContactSince = 0;
   slipArmed = slipDetectionEnabled;
+  wasInSlipSettle = true;
   lastTightenAt = now;
   lastSlipBoostAt = now;
-  lastMotorMoveAt = now;
+  lastFullMotorMoveAt = now;
   postContactPulseOrigin = 0;
+  for (uint8_t f = 0; f < FSR_COUNT; ++f) {
+    fingerReleasingOver[f] = false;
+    overReleaseRefFsr[f] = 0;
+    activeReleaseAccumMs[f] = 0;
+    fingerReleaseStalled[f] = false;
+  }
   resetOpticalMotionWindow();
+  resetLidarSlipWindow();
   gripHoldLidarMm = lidarValid ? lidarDistanceMm : 0;
   gripControllerState = GRIP_HOLDING;
   Serial.println("GRIPSTATE,HOLDING");
@@ -1188,7 +1556,6 @@ void enterForceHoldFromStage2(unsigned long now, const bool hasContact[FSR_COUNT
     }
     fingerAtTarget[f] = true;
     fingerEqualizePaused[f] = false;
-    fingerTightenStartedAt[f] = 0;
     fingerRegulating[f] = false;
     fingerMicroPulsing[f] = false;
   }
@@ -1233,7 +1600,6 @@ bool tryArmHoldingFromCurrentContact(unsigned long now, bool explicitArm) {
     fingerMicroPulsing[f] = false;
     fingerAtTarget[f] = true;
     fingerEqualizePaused[f] = false;
-    fingerTightenStartedAt[f] = 0;
     activePullAccumMs[f] = 0;
   }
   finalizeGripHoldingTransition(now);
@@ -1246,7 +1612,11 @@ void startClosingCycle(unsigned long now) {
   lastSlipBoostAt = 0;
   boostPendingTighten = false;
   slipCandidateSince = 0;
+  holdZeroContactSince = 0;
   slipArmed = false;
+  wasInSlipSettle = false;
+  resetOpticalMotionWindow();
+  resetLidarSlipWindow();
   autoGripStartedAt = now;
   firstContactAt = 0;
   closingContactStage = true;
@@ -1258,7 +1628,6 @@ void startClosingCycle(unsigned long now) {
   bool allEnabledContact = true;
   uint8_t enabledFsrCount = 0;
   for (uint8_t f = 0; f < FSR_COUNT; ++f) {
-    fingerTightenStartedAt[f] = 0;
     fingerParticipating[f] = true;
     fingerEqualizePaused[f] = false;
     gripHoldBaseTarget[f] = closingTargetForceForFinger(f);
@@ -1268,6 +1637,10 @@ void startClosingCycle(unsigned long now) {
     manualFingerClosing[f] = false;
     activePullAccumMs[f] = 0;
     stallRefFsr[f] = fsrNet[f];
+    fingerReleasingOver[f] = false;
+    overReleaseRefFsr[f] = 0;
+    activeReleaseAccumMs[f] = 0;
+    fingerReleaseStalled[f] = false;
     const int servoIdx = findServoIndex(CONTINUOUS_SERVO_FIRST_CHANNEL + f);
     if (servoIdx < 0 || !fsrEnabled[f]) continue;
     ++enabledFsrCount;
@@ -1321,8 +1694,7 @@ void startClosingCycle(unsigned long now) {
             f, (int32_t)refForce - (int32_t)fsrNet[f], refForce);
         applyPostContactMicroPulse(f, servoIdx, cmdAngle, now);
       } else {
-        setTarget(servoIdx, approachContactAngleForFinger(f));
-        printPosition("ACK", servoIdx);
+        driveFingerTowardContact(f, servoIdx, approachContactAngleForFinger(f), true, now);
       }
     }
   }
@@ -1398,11 +1770,16 @@ void updateSmartGripController(unsigned long now) {
         activePullAccumMs[f] = 0;
         fingerMicroPulsing[f] = false;
         fingerRegulating[f] = false;
+        fingerReleasingOver[f] = false;
+        overReleaseRefFsr[f] = 0;
+        activeReleaseAccumMs[f] = 0;
+        fingerReleaseStalled[f] = false;
       }
       postContactPulseOrigin = 0;
       slipForceBoost = 0;
       boostPendingTighten = false;
       waitForObjectRemoval = true;
+      lastFullMotorMoveAt = now;
       gripControllerState = GRIP_IDLE;
       Serial.println("GRIPSTATE,RELEASED");
     }
@@ -1492,7 +1869,6 @@ void updateSmartGripController(unsigned long now) {
           fingerParticipating[f] = fsrEnabled[f] ? hasContact[f] : true;
           fingerAtTarget[f] = true;
           fingerEqualizePaused[f] = false;
-          fingerTightenStartedAt[f] = 0;
           fingerRegulating[f] = false;
           gripHoldBaseTarget[f] = fsrContactThreshold[f];
         }
@@ -1524,7 +1900,6 @@ void updateSmartGripController(unsigned long now) {
             }
           }
           fingerEqualizePaused[f] = false;
-          fingerTightenStartedAt[f] = 0;
           fingerRegulating[f] = false;
           gripHoldBaseTarget[f] = fsrContactThreshold[f];
         }
@@ -1560,11 +1935,7 @@ void updateSmartGripController(unsigned long now) {
         } else if (!fingerAtTarget[f] || fsrNet[f] <= contactResume) {
           fingerAtTarget[f] = false;
           allEnabledReached = false;
-          const int cmd = approachContactAngleForFinger(f);
-          if (targets[servoIdx] != cmd) {
-            setTarget(servoIdx, cmd);
-            printPosition("ACK", servoIdx);
-          }
+          driveFingerTowardContact(f, servoIdx, approachContactAngleForFinger(f), false, now);
         }
       }
 
@@ -1607,7 +1978,6 @@ void updateSmartGripController(unsigned long now) {
           fingerParticipating[f] = fsrEnabled[f] ? held : true;
           fingerAtTarget[f] = true;
           fingerEqualizePaused[f] = false;
-          fingerTightenStartedAt[f] = 0;
           fingerRegulating[f] = false;
           gripHoldBaseTarget[f] = fsrContactThreshold[f];
         }
@@ -1690,12 +2060,9 @@ void updateSmartGripController(unsigned long now) {
                                            : (fsrContactThreshold[f] / 2);
         if (hasContact[f] || fsrState[f] == FSR_HIGH_PRESSURE || fsrState[f] == FSR_SENSOR_ERROR) {
           stopFingerPostContact(f, servoIdx, now);
-        } else if (targets[servoIdx] != DEFAULT_ANGLE || fsrNet[f] <= contactResume) {
-          const int cmd = closingAngleForFinger(f);
-          if (targets[servoIdx] != cmd) {
-            setTarget(servoIdx, cmd);
-            printPosition("ACK", servoIdx);
-          }
+        } else if (fingerMicroPulsing[f] || targets[servoIdx] != DEFAULT_ANGLE ||
+                   fsrNet[f] <= contactResume) {
+          driveFingerTowardContact(f, servoIdx, closingAngleForFinger(f), false, now);
         }
       }
       return;
@@ -1803,9 +2170,9 @@ void updateSmartGripController(unsigned long now) {
       if (!fingerParticipating[f] && fsrState[f] != FSR_SENSOR_ERROR &&
           fsrNet[f] >= fsrContactThreshold[f]) {
         fingerParticipating[f] = true;
-        if (fingerStrokeMs[f] < MAX_FINGER_STROKE_MS) {
-          fingerStalled[f] = false;
-        }
+      }
+      if (fingerStrokeMs[f] < MAX_FINGER_STROKE_MS) {
+        fingerStalled[f] = false;
       }
     }
 
@@ -1816,32 +2183,30 @@ void updateSmartGripController(unsigned long now) {
                                  (slipState == SLIP_LIDAR_CONFIRMED);
       if (confirmedSlip && (now - lastSlipBoostAt >= SLIP_BOOST_INTERVAL_MS)) {
         uint16_t maxPossibleBoost = 0;
-        uint16_t maxOvershoot = 0;
         for (uint8_t f = 0; f < FSR_COUNT; ++f) {
           if (!fsrEnabled[f] || !fingerParticipating[f]) continue;
           if (fsrMaxThreshold[f] > gripHoldBaseTarget[f]) {
             const uint16_t span = fsrMaxThreshold[f] - gripHoldBaseTarget[f];
             if (span > maxPossibleBoost) maxPossibleBoost = span;
           }
-          const uint32_t curTarget = (uint32_t)gripHoldBaseTarget[f] + (uint32_t)slipForceBoost;
-          if (fsrState[f] != FSR_SENSOR_ERROR &&
-              fsrNet[f] < fsrMaxThreshold[f] &&
-              fsrNet[f] > curTarget) {
-            const uint16_t over = (uint16_t)(fsrNet[f] - curTarget);
-            if (over > maxOvershoot) maxOvershoot = over;
-          }
         }
-        uint32_t nextBoost = (uint32_t)slipForceBoost + (uint32_t)maxOvershoot + (uint32_t)slipBoostStep;
+        uint32_t nextBoost = (uint32_t)slipForceBoost + (uint32_t)slipBoostStep;
         if (nextBoost > maxPossibleBoost) nextBoost = maxPossibleBoost;
         if (nextBoost > slipForceBoost) {
           slipForceBoost = (uint16_t)nextBoost;
           boostPendingTighten = true;
           lastSlipBoostAt = now;
           lastTightenAt = now;
+          slipCandidateSince = 0;
+          resetOpticalMotionWindow();
+          resetLidarSlipWindow();
           for (uint8_t f = 0; f < FSR_COUNT; ++f) {
             if (fingerStrokeMs[f] < MAX_FINGER_STROKE_MS) {
               fingerStalled[f] = false;
             }
+            fingerReleasingOver[f] = false;
+            activeReleaseAccumMs[f] = 0;
+            fingerReleaseStalled[f] = false;
           }
           if (lidarValid) gripHoldLidarMm = lidarDistanceMm;
           if (slipLidarActive) {
@@ -1854,18 +2219,34 @@ void updateSmartGripController(unsigned long now) {
       boostPendingTighten = false;
     }
 
-    // Inner Force P-Loop: runs when (forceHoldEnabled || boostPendingTighten) with fingerRegulating hysteresis.
+    const bool slipLockout =
+        (slipCandidateSince != 0) ||
+        (slipState == SLIP_SUSPECTED) ||
+        (slipState == SLIP_CORROBORATED) ||
+        (slipState == SLIP_OPTICAL_CONFIRMED) ||
+        (slipState == SLIP_LIDAR_CONFIRMED) ||
+        boostPendingTighten ||
+        (lastSlipBoostAt != 0 && (now - lastSlipBoostAt < POST_SLIP_RELEASE_LOCKOUT_MS));
+
+    // Inner Two-Way Force Loop: runs when (forceHoldEnabled || boostPendingTighten) with
+    // asymmetric hysteresis (tighten below target; gentle micro-release well above target when !slipLockout).
     uint16_t minHoldForce = 0xFFFF;
+    uint8_t enabledPartCount = 0;
     for (uint8_t f = 0; f < FSR_COUNT; ++f) {
       if (!fsrEnabled[f] || !fingerParticipating[f]) {
         fingerRegulating[f] = false;
+        fingerReleasingOver[f] = false;
+        activeReleaseAccumMs[f] = 0;
         continue;
       }
       const int servoIdx = findServoIndex(CONTINUOUS_SERVO_FIRST_CHANNEL + f);
       if (servoIdx < 0) {
         fingerRegulating[f] = false;
+        fingerReleasingOver[f] = false;
+        activeReleaseAccumMs[f] = 0;
         continue;
       }
+      ++enabledPartCount;
       const uint16_t refForce = activeTargetForceForFinger(f);
       const int32_t error = (int32_t)refForce - (int32_t)fsrNet[f];
       if (error <= 0 ||
@@ -1881,63 +2262,79 @@ void updateSmartGripController(unsigned long now) {
       if (fingerRegulating[f] && fsrNet[f] < minHoldForce) {
         minHoldForce = fsrNet[f];
       }
+
+      const int32_t overAmount = (int32_t)fsrNet[f] - (int32_t)refForce;
+      const int32_t overStartBand =
+          ((int32_t)forceHoldDeadband + 25 > 50) ? ((int32_t)forceHoldDeadband + 25) : 50;
+      const int32_t overStopBand =
+          ((int32_t)forceHoldDeadband + 5 > 28) ? ((int32_t)forceHoldDeadband + 5) : 28;
+      const int32_t safeFloor = (int32_t)fsrContactThreshold[f] + 10;
+      if (!forceHoldEnabled ||
+          slipLockout ||
+          fingerRegulating[f] ||
+          fsrState[f] == FSR_SENSOR_ERROR ||
+          fingerReleaseStalled[f] ||
+          overAmount <= overStopBand ||
+          (int32_t)fsrNet[f] <= safeFloor) {
+        fingerReleasingOver[f] = false;
+        activeReleaseAccumMs[f] = 0;
+      } else if (!fingerReleasingOver[f] &&
+                 overAmount > overStartBand &&
+                 (int32_t)fsrNet[f] > safeFloor) {
+        fingerReleasingOver[f] = true;
+        overReleaseRefFsr[f] = fsrNet[f];
+        activeReleaseAccumMs[f] = 0;
+      }
     }
 
     bool anyTightening = false;
     int sumHoldOffset = 0;
     uint8_t holdMovingCount = 0;
+    int sumReleaseOffset = 0;
+    uint8_t releaseMovingCount = 0;
     for (uint8_t f = 0; f < FSR_COUNT; ++f) {
       if (!fsrEnabled[f] || !fingerParticipating[f]) continue;
       const int servoIdx = findServoIndex(CONTINUOUS_SERVO_FIRST_CHANNEL + f);
       if (servoIdx < 0) continue;
 
-      if (!fingerRegulating[f]) {
-        fingerTightenStartedAt[f] = 0;
-        fingerEqualizePaused[f] = false;
-        stopFingerPostContact(f, servoIdx, now);
-        continue;
-      }
-
-      const uint16_t refForce = activeTargetForceForFinger(f);
-      const int32_t error = (int32_t)refForce - (int32_t)fsrNet[f];
-      const int32_t lead = (minHoldForce == 0xFFFF)
-                               ? 0
-                               : ((int32_t)fsrNet[f] - (int32_t)minHoldForce);
-      if (lead >= CLOSING_EQUALIZE_BAND_ADC) {
-        fingerEqualizePaused[f] = true;
-      } else if (lead <= CLOSING_EQUALIZE_RESUME_ADC) {
-        fingerEqualizePaused[f] = false;
-      }
-
-      if (fingerEqualizePaused[f]) {
-        anyTightening = true;
-        fingerTightenStartedAt[f] = 0;
-        stopFingerPostContact(f, servoIdx, now);
-        continue;
-      }
-
-      if (fingerTightenStartedAt[f] == 0) {
-        fingerTightenStartedAt[f] = now;
-      } else if (now - fingerTightenStartedAt[f] >= HOLD_TIGHTEN_TIMEOUT_MS) {
-        stopFingerPostContact(f, servoIdx, now);
-        fingerStalled[f] = true;
-        fingerRegulating[f] = false;
-        fingerTightenStartedAt[f] = 0;
-        if (fsrNet[f] < gripHoldBaseTarget[f]) {
-          gripHoldBaseTarget[f] = fsrNet[f];
+      if (fingerRegulating[f]) {
+        const uint16_t refForce = activeTargetForceForFinger(f);
+        const int32_t error = (int32_t)refForce - (int32_t)fsrNet[f];
+        const int32_t lead = (minHoldForce == 0xFFFF)
+                                 ? 0
+                                 : ((int32_t)fsrNet[f] - (int32_t)minHoldForce);
+        if (lead >= CLOSING_EQUALIZE_BAND_ADC) {
+          fingerEqualizePaused[f] = true;
+        } else if (lead <= CLOSING_EQUALIZE_RESUME_ADC) {
+          fingerEqualizePaused[f] = false;
         }
-        Serial.print("STALL,");
-        Serial.print(f);
-        Serial.print(',');
-        Serial.println(fsrNet[f]);
+
+        if (fingerEqualizePaused[f]) {
+          anyTightening = true;
+          stopFingerPostContact(f, servoIdx, now);
+          continue;
+        }
+
+        anyTightening = true;
+        const int cmd = calmSlipClosingAngleForFinger(f, error, refForce);
+        applyPostContactMicroPulse(f, servoIdx, cmd, now);
+        sumHoldOffset += abs(cmd - DEFAULT_ANGLE);
+        ++holdMovingCount;
         continue;
       }
 
-      anyTightening = true;
-      const int cmd = calmSlipClosingAngleForFinger(f, error, refForce);
-      applyPostContactMicroPulse(f, servoIdx, cmd, now);
-      sumHoldOffset += abs(cmd - DEFAULT_ANGLE);
-      ++holdMovingCount;
+      fingerEqualizePaused[f] = false;
+
+      if (fingerReleasingOver[f]) {
+        const uint16_t refForce = activeTargetForceForFinger(f);
+        const int32_t overAmount = (int32_t)fsrNet[f] - (int32_t)refForce;
+        const int openCmd = calmOpeningAngleForFinger(f, overAmount, refForce);
+        applyOverTargetReleaseMicroPulse(f, servoIdx, openCmd, now);
+        sumReleaseOffset += abs(openCmd - DEFAULT_ANGLE);
+        ++releaseMovingCount;
+      } else {
+        stopFingerPostContact(f, servoIdx, now);
+      }
     }
 
     for (uint8_t f = 0; f < FSR_COUNT; ++f) {
@@ -1951,6 +2348,16 @@ void updateSmartGripController(unsigned long now) {
                                   ? (DEFAULT_ANGLE - avgOff)
                                   : (DEFAULT_ANGLE + avgOff);
         applyPostContactMicroPulse(f, servoIdx, followCmd, now);
+      } else if (releaseMovingCount > 0 &&
+                 enabledPartCount > 0 &&
+                 releaseMovingCount == enabledPartCount &&
+                 !slipLockout &&
+                 !fingerReleaseStalled[f]) {
+        const int avgOff = sumReleaseOffset / (int)releaseMovingCount;
+        const int followOpenCmd = fingerInvertClose[f]
+                                      ? (DEFAULT_ANGLE + avgOff)
+                                      : (DEFAULT_ANGLE - avgOff);
+        applyOverTargetReleaseMicroPulse(f, servoIdx, followOpenCmd, now);
       } else {
         stopFingerPostContact(f, servoIdx, now);
       }
@@ -2055,6 +2462,10 @@ void updateMotion(unsigned long now) {
     if (!isContinuousServo(index) && !servoPositionValid[index]) continue;
     const float delta = targets[index] - currentAngles[index];
     const float distance = fabsf(delta);
+    if (!isContinuousServo(index) && servoPositionValid[index] &&
+        (distance >= 0.05f || fabsf(currentVelocities[index]) >= 0.2f)) {
+      lastArmServoMoveAt = now;
+    }
     if (distance < 0.02f && fabsf(currentVelocities[index]) < 0.1f) {
       currentAngles[index] = targets[index];
       currentVelocities[index] = 0;
@@ -2205,6 +2616,10 @@ void handleFsrCalibration(char* command) {
     fingerMicroPulsing[finger] = false;
     fingerRegulating[finger] = false;
     activePullAccumMs[finger] = 0;
+    fingerReleasingOver[finger] = false;
+    overReleaseRefFsr[finger] = 0;
+    activeReleaseAccumMs[finger] = 0;
+    fingerReleaseStalled[finger] = false;
   } else {
     updateFsrState((uint8_t)finger);
   }
@@ -2223,10 +2638,12 @@ void handleFsrCalibration(char* command) {
 }
 
 void handleLoopCalibration(char* command) {
-  char* fields[8] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
+  char* fields[10] = {
+      nullptr, nullptr, nullptr, nullptr, nullptr,
+      nullptr, nullptr, nullptr, nullptr, nullptr};
   fields[0] = command;
   uint8_t fieldCount = 1;
-  for (uint8_t i = 1; i < 8; ++i) {
+  for (uint8_t i = 1; i < 10; ++i) {
     char* comma = strchr(fields[i - 1], ',');
     if (!comma) break;
     *comma = '\0';
@@ -2240,11 +2657,15 @@ void handleLoopCalibration(char* command) {
   long trig = 0, dwell = 0, vel = 0, relMs = 0, boost = 0, deadband = 0;
   long gripTimeout = autoGripTimeoutMs;
   long slipSpeed = slipTightenSpeedPct;
+  long slipConfirm = slipConfirmMs;
+  long palmZone = palmZoneMaxMm;
   if (!parseNumber(fields[0], trig) || !parseNumber(fields[1], dwell) ||
       !parseNumber(fields[2], vel) || !parseNumber(fields[3], relMs) ||
       !parseNumber(fields[4], boost) || !parseNumber(fields[5], deadband) ||
       (fieldCount >= 7 && !parseNumber(fields[6], gripTimeout)) ||
-      (fieldCount >= 8 && !parseNumber(fields[7], slipSpeed))) {
+      (fieldCount >= 8 && !parseNumber(fields[7], slipSpeed)) ||
+      (fieldCount >= 9 && !parseNumber(fields[8], slipConfirm)) ||
+      (fieldCount >= 10 && !parseNumber(fields[9], palmZone))) {
     Serial.println("ERR,BAD_LOOPCAL_NUMBER");
     return;
   }
@@ -2252,7 +2673,9 @@ void handleLoopCalibration(char* command) {
       vel < 10 || vel > 500 || relMs < 200 || relMs > 5000 ||
       boost < 20 || boost > 500 || deadband < 10 || deadband > 300 ||
       gripTimeout < MIN_AUTO_GRIP_TIMEOUT_MS || gripTimeout > MAX_AUTO_GRIP_TIMEOUT_MS ||
-      slipSpeed < MIN_SLIP_TIGHTEN_SPEED_PCT || slipSpeed > MAX_SLIP_TIGHTEN_SPEED_PCT) {
+      slipSpeed < MIN_SLIP_TIGHTEN_SPEED_PCT || slipSpeed > MAX_SLIP_TIGHTEN_SPEED_PCT ||
+      slipConfirm < MIN_SLIP_CONFIRM_MS || slipConfirm > MAX_SLIP_CONFIRM_MS ||
+      palmZone < MIN_PALM_ZONE_MAX_MM || palmZone > MAX_PALM_ZONE_MAX_MM) {
     Serial.println("ERR,BAD_LOOPCAL_RANGE");
     return;
   }
@@ -2264,6 +2687,8 @@ void handleLoopCalibration(char* command) {
   forceHoldDeadband = (uint16_t)deadband;
   autoGripTimeoutMs = (uint16_t)gripTimeout;
   slipTightenSpeedPct = (uint8_t)slipSpeed;
+  slipConfirmMs = (uint16_t)slipConfirm;
+  palmZoneMaxMm = (uint16_t)palmZone;
   Serial.print("ACKLOOPCAL,");
   Serial.print(lidarTriggerMm);
   Serial.print(',');
@@ -2279,7 +2704,11 @@ void handleLoopCalibration(char* command) {
   Serial.print(',');
   Serial.print(autoGripTimeoutMs);
   Serial.print(',');
-  Serial.println(slipTightenSpeedPct);
+  Serial.print(slipTightenSpeedPct);
+  Serial.print(',');
+  Serial.print(slipConfirmMs);
+  Serial.print(',');
+  Serial.println(palmZoneMaxMm);
 }
 
 void handleGripCommand(const char* action) {
@@ -2410,9 +2839,9 @@ void handleCommand(char* command) {
     return;
   }
   if (strncmp(command, "AUTOMODE,", 9) == 0) {
-    char* fields[3] = {command + 9, nullptr, nullptr};
+    char* fields[4] = {command + 9, nullptr, nullptr, nullptr};
     uint8_t fieldCount = 1;
-    for (uint8_t i = 1; i < 3; ++i) {
+    for (uint8_t i = 1; i < 4; ++i) {
       char* comma = strchr(fields[i - 1], ',');
       if (!comma) break;
       *comma = '\0';
@@ -2424,16 +2853,25 @@ void handleCommand(char* command) {
       return;
     }
     long autoLidar = 0, slipEnabled = 0, forceHold = 0;
+    long sensorMode = (long)slipSensorMode;
     if (!parseNumber(fields[0], autoLidar) || !parseNumber(fields[1], slipEnabled) ||
         (fieldCount >= 3 && !parseNumber(fields[2], forceHold)) ||
+        (fieldCount >= 4 && !parseNumber(fields[3], sensorMode)) ||
         (autoLidar != 0 && autoLidar != 1) || (slipEnabled != 0 && slipEnabled != 1) ||
-        (fieldCount >= 3 && forceHold != 0 && forceHold != 1)) {
+        (fieldCount >= 3 && forceHold != 0 && forceHold != 1) ||
+        (fieldCount >= 4 && (sensorMode < SLIP_MODE_AUTO || sensorMode > SLIP_MODE_FINGERTIP_LIDAR))) {
       Serial.println("ERR,BAD_AUTOMODE");
       return;
     }
     autoLidarGripEnabled = (autoLidar == 1);
     slipDetectionEnabled = (slipEnabled == 1);
     forceHoldEnabled = (fieldCount >= 3) ? (forceHold == 1) : slipDetectionEnabled;
+    if (fieldCount >= 4 && (uint8_t)sensorMode != slipSensorMode) {
+      slipSensorMode = (uint8_t)sensorMode;
+      slipCandidateSince = 0;
+      slipOpticalActive = false;
+      slipLidarActive = false;
+    }
     if (!autoLidarGripEnabled && gripControllerState == GRIP_DWELL) {
       gripControllerState = GRIP_IDLE;
       Serial.println("GRIPSTATE,IDLE");
@@ -2448,7 +2886,9 @@ void handleCommand(char* command) {
     Serial.print(',');
     Serial.print(slipDetectionEnabled ? 1 : 0);
     Serial.print(',');
-    Serial.println(forceHoldEnabled ? 1 : 0);
+    Serial.print(forceHoldEnabled ? 1 : 0);
+    Serial.print(',');
+    Serial.println(slipSensorMode);
     return;
   }
   if (strncmp(command, "GRIP,", 5) == 0) {
@@ -2472,6 +2912,11 @@ void handleCommand(char* command) {
     }
     optMotionThreshold = (uint16_t)motionThr;
     optSqualThreshold = (uint8_t)squalThr;
+    if (optSqualThreshold > 0 && opticalSensorOnline) {
+      optSqual = paaReadReg(0x07);
+    } else {
+      optSqual = 0;
+    }
     evaluateOpticalState(millis(), 0.0f, 0.0f);
     Serial.print("ACKOPTCAL,");
     Serial.print(optMotionThreshold);
