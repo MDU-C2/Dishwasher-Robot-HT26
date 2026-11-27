@@ -1,0 +1,62 @@
+{
+  "model_id": "marc_v5s_640",
+  "generation": "G1",
+  "architecture": "YOLOv5s",
+  "num_classes": 8,
+  "source_labels": [
+    "Back",
+    "Front",
+    "Gripper",
+    "handle",
+    "left_side",
+    "right_side",
+    "upright",
+    "upside_down"
+  ],
+  "source_id_to_canonical": {
+    "0": 0,
+    "1": 1,
+    "2": null,
+    "3": null,
+    "4": 2,
+    "5": 3,
+    "6": 4,
+    "7": 5
+  },
+  "input_size": [
+    640,
+    640
+  ],
+  "shaves": 5,
+  "deploy_preprocess_note": "720p RGB center-crop to 640x640 in A1119/camera_setup.py",
+  "source_origin": "Inherited from previous MARC / Dishwasher-Robot-HT26 project",
+  "notes": "Baseline inherited 8-class model (includes Gripper, handle); no .pt or training logs available locally.",
+  "artifacts": {
+    "pt": null,
+    "onnx": null,
+    "blob": "../Vision_System/models/marc_v5s_640/marc_v5s_640_5shave.blob",
+    "depthai_config": "models/marc_v5s_640/config/depthai_config.json",
+    "results_csv": null
+  },
+  "extra_configs": [],
+  "training_plots": {},
+  "sha256": {
+    "onnx": "38365a5c10edc14bbddcd8dd311dab6de306a2b94daffa8367e624472fda6182",
+    "blob": "67728f2d273942780448b9046a3d48599219f1d1a16c650229657245e7962001",
+    "depthai_config": "b186738d62186dd4728c667e236c2e98fb52e3b24315cd8adec6d92e6fd9ffec"
+  },
+  "training": {
+    "dataset": "MARC legacy (undocumented)",
+    "init_weights": "unknown",
+    "trained_date": "pre-2026-09-10"
+  },
+  "original_sources": {
+    "onnx": "<workspace>/Dishwasher-Robot-HT26\\Python\\3D_Vision\\blob_v5\\best_Yolo5_small-simplified.onnx",
+    "blob": "<workspace>/models\\A1119\\blob_v5\\best_Yolo5_small_openvino_2022.1_5shave.blob",
+    "depthai_config": "<workspace>/models\\A1119\\blob_v5\\best_Yolo5_small.json"
+  },
+  "source_group": "marc",
+  "paper_core": true,
+  "legacy_id": "g1_v5s_8cls_640_marc",
+  "display_name": "MARC-v5s-640"
+}

@@ -1,0 +1,72 @@
+weights: <ft_marc_training_root>/weights\yolov5s.pt
+cfg: ''
+data: <ft_marc_training_root>/runs\aug_v1\dataset.yaml
+hyp:
+  anchor_t: 4.0
+  box: 0.05
+  cls: 0.5
+  cls_pw: 1.0
+  copy_paste: 0.0
+  degrees: 0.0
+  fl_gamma: 0.0
+  fliplr: 0.0
+  flipud: 0.0
+  hsv_h: 0.015
+  hsv_s: 0.7
+  hsv_v: 0.4
+  iou_t: 0.2
+  lr0: 0.01
+  lrf: 0.01
+  mixup: 0.0
+  momentum: 0.937
+  mosaic: 1.0
+  obj: 1.0
+  obj_pw: 1.0
+  perspective: 0.0
+  scale: 0.5
+  shear: 0.0
+  translate: 0.1
+  warmup_bias_lr: 0.1
+  warmup_epochs: 3.0
+  warmup_momentum: 0.8
+  weight_decay: 0.0005
+epochs: 150
+batch_size: 16
+imgsz: 416
+rect: false
+resume: false
+nosave: false
+noval: false
+noautoanchor: false
+noplots: false
+evolve: null
+evolve_population: tools\tools\yolo\yolov5\data\hyps
+resume_evolve: null
+bucket: ''
+cache: null
+image_weights: false
+device: '0'
+multi_scale: false
+single_cls: false
+optimizer: AdamW
+sync_bn: false
+workers: 4
+project: <ft_marc_training_root>/runs\aug_v1\yolov5s_416
+name: fit
+exist_ok: false
+quad: false
+cos_lr: false
+label_smoothing: 0.0
+patience: 30
+freeze:
+- 0
+save_period: -1
+seed: 42
+local_rank: -1
+entity: null
+upload_dataset: false
+bbox_interval: -1
+artifact_alias: latest
+ndjson_console: false
+ndjson_file: false
+save_dir: <ft_marc_training_root>/runs\aug_v1\yolov5s_416\fit

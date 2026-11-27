@@ -1,0 +1,61 @@
+DVA490 Independent Vision Detection Test Set — Capture & Annotation Protocol v0.1
+Date: 2026-11-24. Status: Protocol specification (hardware capture and freezing tracked separately).
+
+1. Scope & Confirmed Definitions
+This module covers OAK -> RGB image capture for offline 2D cup detection and orientation benchmarking. It does not measure stereo depth accuracy, hand-eye transform error, or physical grasp success rate.
+Confirmed setup: fixed OAK-D Pro mount; working distance ~30-70 cm, lateral workspace width ~50 cm. `Back` = camera views cup bottom; `Front` = cup opening faces camera; `left_side` / `right_side` are defined in the camera image frame.
+Recommended distance bands: Near N=[30, 43) cm, Mid M=[43, 57) cm, Far F=[57, 70] cm, measured as straight-line physical distance from the OAK RGB optical center to the cup center (estimated distance is not a substitute for stereo depth accuracy). Lateral x is referenced to workspace center (0), positive to the right in the image (~-25 to +25 cm). Physical visibility and reachability take precedence; document unreachable placements rather than moving the camera.
+Record mounting photos, camera serial/ID, height/tilt angle, lighting conditions, and distance measurement method before formal capture. Pilot test images must be excluded from the final test set.
+
+2. Target Quota: 100 Candidate Scenes
+Base single-cup set (72 planned base scenes in v0.1; final benchmark uses 54 single-cup + 38 multi-cup + 8 negative):
+- Base single-cup scenes interleave distance bands (N/M/F), 6 orientations, and lateral targets (-20, -7, +7, +20 cm, +/-3 cm tolerance) across independent re-placements.
+- Lift and re-place the cup between every shot with slight translation/angle variation while preserving clear class identity; record physical cup ID. Split captures across at least two independent sessions while keeping the camera fixed. Disclose shared cup models (do not claim unseen-cup generalization unless tested separately).
+Complex scenes (28 planned in v0.1; expanded to 38 multi-cup + 8 negative in final benchmark):
+- Multi-cup / occlusion: 2-3 cups per image covering light and moderate occlusion across N/M/F bands; annotate every visible cup instance.
+- Workspace boundary placements: cups near left/right image edges (complete and mildly truncated); move ambiguous-orientation samples to quarantine rather than forcing a label.
+- Cup + stationary robot arm/joint co-occurrence: captured safely with a stationary robot (this tool never moves the robot).
+- Pure negative arm-only scenes: robot arm/joint visible with zero cups.
+- Pure negative empty-table scenes: zero cups under varied lighting/background clutter.
+Note: With only 8 pure-negative images in a 100-image set, empty-scene false positive rates are exploratory and should not be over-interpreted from 1-2 image differences.
+
+3. Capture Workflow
+Legacy `models/5s_samp/capture_training_images.py` saves clean 1080p/30fps RGB JPEGs (`depth_enabled=False`) without session metadata; its hotkeys 1-6 map to Upright/Down/Left/Right/Back/Front (not canonical class IDs).
+The standalone `capture_rgb.py` tool keeps deployment scripts untouched and builds only an RGB video pipeline (no StereoDepth or NN node). Pin DepthAI 2.30.0.0; if StereoDepth is enabled in any future pipeline, explicitly set `Subpixel=False` and `ExtendedDisparity=True`.
+Setup steps:
+1. Copy `session.template.json`, fill operator, mount ID, lighting, camera notes, and a unique session ID (e.g. `T20261125A`), and set `protocol_confirmed=true`.
+2. Copy required rows from `planned-scenes.jsonl` to `session-plan.jsonl`, preserving `scene_id`. Never mix pilot images into the formal plan.
+3. Run offline pre-flight check (no camera opened):
+   python capture_rgb.py --session session.json --plan session-plan.jsonl --output datasets/independent-vision-test
+4. Append `--live` only when ready to capture on OAK-D Pro (close other OAK apps first). Press `R` after completing each new physical placement, wait at least 2 seconds for a steady frame, then press Space to save; press `Q` to quit.
+5. Never cherry-pick images based on model predictions (the capture tool displays no model outputs). Record per-frame exposure/ISO/focus/white-balance metadata.
+6. Use a new session ID for every run; never overwrite prior sessions. Output pairs `<session>/images/<scene_id>.png` and `metadata/<scene_id>.json` (unannotated images never auto-create empty `.txt` labels).
+7. Record `measured_distance_cm`, `measured_x_cm`, `cup_ids`, `object_count`, and actual occlusion/lighting notes after capture. Do not rename, rotate, crop, or augment raw captured PNGs.
+
+4. Annotation Specification (Canonical 6 Classes)
+Canonical class IDs: `0: Back`, `1: Front`, `2: left_side`, `3: right_side`, `4: upright`, `5: upside_down`.
+- `Back`: bottom of cup faces camera; `Front`: opening faces camera; `left_side` / `right_side`: horizontal orientation in the camera image frame; `upright`: opening up; `upside_down`: opening down.
+- Draw tight bounding boxes around the visible cup contour (including handle if present, excluding shadows, robot gripper, and empty background). Under occlusion, bound the visible contour; clamp truncated boxes to image edges.
+- Label every discernible cup in multi-cup images. Annotators must not inspect model predictions during labeling; run a second-pass audit (disclose single-reviewer vs dual-reviewer status).
+- Quarantine images with unrecognizable orientation or severe ambiguity rather than silently treating missed cups as background.
+- YOLO label format: matching `.txt` with normalized `[0, 1]` coordinates (`class_id cx cy w h`, `w > 0`, `h > 0`). Re-project exported boxes onto original PNGs to check for resize/rotation drift.
+- Pure-negative (no-cup) images must be explicitly marked empty and exported as zero-byte `.txt` files (missing `.txt` indicates an export failure, not a negative sample). Robot joints are not a cup class.
+
+5. Manifest & Data Leakage Isolation
+- `planned-scenes.jsonl` holds planned scene definitions (`status=planned`), not captured records.
+- Per-image sidecar JSONs from `capture_rgb.py` plus `annotation-record.template.json` preserve SHA256 hashes, annotation version, reviewer metadata, quarantine status, and instance attributes.
+- Maintain complete separation between training/validation/legacy-test data and the independent test set. Audit with exact SHA256 matching plus perceptual similarity checks and manual inspection; explicitly state any uncovered legacy data sources rather than claiming zero leakage without full coverage.
+
+6. Model Comparison & Reporting Boundaries
+- Map legacy 7/8-class models onto canonical 6 cup classes (`Gripper` and `handle` audited separately and excluded from 6-class mAP). Predicting a cup label on a robot arm/joint counts as a cup false positive; predicting `Gripper` does not.
+- Separate deployment-matched preprocessing (`stretch`) from aspect-preserving (`letterbox`) evaluations, and never mix OAK `.blob` FP16 results with PC PyTorch FP32 results.
+- Report per-class precision/recall, mAP@50, mAP@50:95, confusion matrices, subset breakdowns (single/multi/negative), empty-scene FPIR, and on-chip latency/FPS. Compute full AP using low-confidence ranked predictions (`conf=0.001`), not threshold-truncated (`0.5`) outputs.
+
+7. Freeze Acceptance Checklist
+- [ ] Orientation examples, box rules, exclusion rules, candidate models, and comparison protocol finalized.
+- [ ] Every image decodable at target resolution with no visual overlays; 1:1 PNG/metadata/label match; no invalid IDs or zero-size boxes.
+- [ ] Planned vs captured counts documented; physical re-placements traceable; negative scenes manually verified.
+- [ ] All annotations reviewed and disputes resolved; hard examples retained regardless of model performance.
+- [ ] Exact and near-duplicate leakage checks completed against available development data (with any missing sources disclosed).
+- [ ] SHA256 manifest, class map, protocol, model manifest, and exclusion log frozen with version tag and date.
+- [ ] Test set never used for training, model selection, or threshold tuning.

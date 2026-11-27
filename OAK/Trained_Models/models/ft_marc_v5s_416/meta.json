@@ -1,0 +1,102 @@
+{
+  "model_id": "ft_marc_v5s_416",
+  "generation": "G2",
+  "architecture": "YOLOv5s",
+  "num_classes": 7,
+  "source_labels": [
+    "Back",
+    "Front",
+    "Gripper",
+    "left_side",
+    "right_side",
+    "upright",
+    "upside_down"
+  ],
+  "source_id_to_canonical": {
+    "0": 0,
+    "1": 1,
+    "2": null,
+    "3": 2,
+    "4": 3,
+    "5": 4,
+    "6": 5
+  },
+  "input_size": [
+    416,
+    416
+  ],
+  "shaves": 5,
+  "deploy_preprocess_note": "1080p RGB stretched (keepAspectRatio=False) in A1119/camera_setup.py",
+  "source_origin": "Fine-tuned MARC baseline (complete_v3 / aug_v1)",
+  "notes": "Fine-tuned MARC ablation matrix anchor with full .pt, results.csv, curves; also used as fine-tune base for G3 v5s.",
+  "artifacts": {
+    "pt": null,
+    "onnx": null,
+    "blob": "../Vision_System/models/ft_marc_v5s_416/ft_marc_v5s_416_5shave.blob",
+    "depthai_config": "models/ft_marc_v5s_416/config/depthai_config.json",
+    "results_csv": "models/ft_marc_v5s_416/training/results.csv"
+  },
+  "extra_configs": [
+    "config.json",
+    "depthai_v2.json",
+    "buildinfo.json",
+    "conversion.json",
+    "config_legacy.json"
+  ],
+  "training_plots": {
+    "fit": [
+      "confusion_matrix.png",
+      "F1_curve.png",
+      "P_curve.png",
+      "PR_curve.png",
+      "R_curve.png",
+      "results.png"
+    ],
+    "validation": [
+      "confusion_matrix.png",
+      "F1_curve.png",
+      "P_curve.png",
+      "PR_curve.png",
+      "R_curve.png"
+    ]
+  },
+  "sha256": {
+    "pt": "ed172cba281c7a3be47232c4e17d959d2fa407572f5a463dc21d2b8d1a876edd",
+    "blob": "8b0376d47eee10f8bf207d870158bfc9286ed7f3de3b26aaa3f1ea7a458a64dd",
+    "depthai_config": "1a933f17e7e774e3214d0a10233e98db0f1263b029b2a7bb15265c0b481769d8",
+    "results_csv": "1280bf6dfe5b58b57122ee9f377ff64108f69f83828f33e22fde2da62c65c227"
+  },
+  "training": {
+    "dataset": "complete_v3 (aug_v1)",
+    "init_weights": "yolov5s.pt",
+    "trained_date": "2026-09-29",
+    "epochs_planned": 150,
+    "batch_size": 16,
+    "gpu": "NVIDIA GeForce RTX 4080 SUPER",
+    "epochs_completed": 150,
+    "best_val_metrics": {
+      "epoch": 148,
+      "precision": 0.9674,
+      "recall": 0.9522,
+      "mAP50": 0.9809,
+      "mAP50_95": 0.871
+    },
+    "last_val_metrics": {
+      "epoch": 149,
+      "precision": 0.963,
+      "recall": 0.9565,
+      "mAP50": 0.9809,
+      "mAP50_95": 0.8706
+    }
+  },
+  "original_sources": {
+    "pt": "<workspace>/models\\yolov5s_416withpt\\fit\\weights\\best.pt",
+    "blob": "<workspace>/models\\v5s_aug_416\\best.blob",
+    "depthai_config": "<workspace>/models\\v5s_aug_416\\config_legacy.json",
+    "results_csv": "<workspace>/models\\yolov5s_416withpt\\fit\\results.csv"
+  },
+  "source_group": "ft_marc",
+  "paper_core": true,
+  "legacy_id": "g2_v5s_7cls_416_aug",
+  "display_name": "FT-MARC-v5s-416"
+}

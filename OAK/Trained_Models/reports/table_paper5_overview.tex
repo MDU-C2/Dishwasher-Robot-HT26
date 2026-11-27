@@ -1,0 +1,17 @@
+\begin{table*}[t]
+  \centering
+  \caption{Core 5-model 3D cup-orientation YOLO lineup selected for thesis evaluation (all compiled to 5-SHAVE OAK-D Pro FP16 blobs). Validation metrics reflect each run's native validation split.}
+  \label{tab:paper5-models}
+  \small
+  \begin{tabular}{llccclcccc}
+    \toprule
+    Model ID & Arch. & Cls & Input & SHAVE & Dataset & Ep. & Val P & Val R & Val mAP@50 / 50:95 \\
+    \midrule
+    MARC-v5s-640 & YOLOv5s & 8 & 640 & 5 & MARC legacy (undocumented) & -- & -- & -- & -- \\
+    FT-MARC-v5s-416 & YOLOv5s & 7 & 416 & 5 & complete\_v3 (aug\_v1) & 150 & 0.967 & 0.952 & 0.981 / 0.871 \\
+    YOLOv5s-416 & YOLOv5s & 6 & 416 & 5 & 2026\_GreG-4 & 120 & 0.901 & 0.930 & 0.928 / 0.774 \\
+    YOLO11n-416 & YOLO11n & 6 & 416 & 5 & 2026\_GreG-4 & 120 & 0.931 & 0.937 & 0.935 / 0.778 \\
+    YOLO11n-640 & YOLO11n & 6 & 640 & 5 & 2026\_GreG-4 & 120 & 0.920 & 0.899 & 0.941 / 0.795 \\
+    \bottomrule
+  \end{tabular}
+\end{table*}

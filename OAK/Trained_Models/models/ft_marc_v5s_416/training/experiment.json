@@ -1,0 +1,38 @@
+{
+  "model": "yolov5s",
+  "backend": "yolov5",
+  "weights": "<ft_marc_training_root>/weights\\yolov5s.pt",
+  "size": 416,
+  "epochs": 150,
+  "patience": 30,
+  "batch": 16,
+  "workers": 4,
+  "seed": 42,
+  "device": "0",
+  "data": "<ft_marc_training_root>/runs\\aug_v1\\dataset.yaml",
+  "labels": [
+    "Back",
+    "Front",
+    "Gripper",
+    "left_side",
+    "right_side",
+    "upright",
+    "upside_down"
+  ],
+  "status": "complete",
+  "source_data": "<ft_marc_training_root>/datasets\\complete_v3\\data.yaml",
+  "data_yaml_sha256": "fbf7a7e46c18a25f6e71c60477330c4b8a05ad99f261418c4bb87760bd222e1d",
+  "runtime": {
+    "python": "3.12.14 (main, Aug 25 2026, 14:01:42) [MSC v.1944 64 bit (AMD64)]",
+    "torch": "2.7.1+cu128",
+    "gpu": "NVIDIA GeForce RTX 4080 SUPER",
+    "ultralytics": "8.4.163"
+  },
+  "best_pt": "<ft_marc_training_root>/runs\\aug_v1\\yolov5s_416\\fit\\weights\\best.pt",
+  "metrics": {
+    "precision": 0.9673656407000727,
+    "recall": 0.9521768694481741,
+    "mAP50": 0.9808320371475947,
+    "mAP50_95": 0.8692353655694672
+  }
+}

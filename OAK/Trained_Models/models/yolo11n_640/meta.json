@@ -1,0 +1,90 @@
+{
+  "model_id": "yolo11n_640",
+  "generation": "G3",
+  "architecture": "YOLO11n",
+  "num_classes": 6,
+  "source_labels": [
+    "Back",
+    "Front",
+    "left_side",
+    "right_side",
+    "upright",
+    "upside_down"
+  ],
+  "source_id_to_canonical": {
+    "0": 0,
+    "1": 1,
+    "2": 2,
+    "3": 3,
+    "4": 4,
+    "5": 5
+  },
+  "input_size": [
+    640,
+    640
+  ],
+  "shaves": 5,
+  "deploy_preprocess_note": "Compiled to 5-SHAVE RVC2 OpenVINO 2022.1 FP16 blob via Luxonis tools; hardware inference pending",
+  "source_origin": "Google Colab / Drive (paper_cup_yolo11/paper_cups_640_full120_20261120_101123)",
+  "notes": "640x640 resolution control run on 2026_GreG-4 (120 ep, patience=0, batch=8); directly pairs with yolo11n_416.",
+  "artifacts": {
+    "pt": null,
+    "onnx": null,
+    "blob": "../Vision_System/models/yolo11n_640/yolo11n_640_5shave.blob",
+    "depthai_config": "models/yolo11n_640/config/depthai_config.json",
+    "results_csv": "models/yolo11n_640/training/results.csv"
+  },
+  "extra_configs": [
+    "conversion_verification.json"
+  ],
+  "training_plots": {
+    "fit": [
+      "BoxF1_curve.png",
+      "BoxP_curve.png",
+      "BoxPR_curve.png",
+      "BoxR_curve.png",
+      "confusion_matrix.png",
+      "confusion_matrix_normalized.png",
+      "results.png"
+    ]
+  },
+  "sha256": {
+    "pt": "7cd3a174fc9615672063f3e63cf9a943c5d9129cd0f0a7c5a7ef22241fa8b245",
+    "results_csv": "8910850b041fbd7bdeeefcb71f58cf41ed2ff320f7f5b977aff318e5f23e5bdd",
+    "blob": "74713b2e318071aad663a03fb8a53e1fd686b7f2fdced3ce25a9ea4b472ef10e",
+    "onnx": "90e7adc0f4c9e22cee755290702f5a44693332fafa7beda5efb64b543993cb7e",
+    "depthai_config": "a00607873d6306aa2e6cca1f1930917ffe56e386352070409473ac946fea5c78"
+  },
+  "training": {
+    "dataset": "2026_GreG-4",
+    "init_weights": "yolo11n.pt (COCO)",
+    "epochs_planned": 120,
+    "batch_size": 8,
+    "patience": 0,
+    "optimizer": "auto",
+    "trained_date": "2026-11-20",
+    "epochs_completed": 120,
+    "best_val_metrics": {
+      "epoch": 37,
+      "precision": 0.9197,
+      "recall": 0.8989,
+      "mAP50": 0.9413,
+      "mAP50_95": 0.795
+    },
+    "last_val_metrics": {
+      "epoch": 120,
+      "precision": 0.9195,
+      "recall": 0.9003,
+      "mAP50": 0.9103,
+      "mAP50_95": 0.7442
+    }
+  },
+  "original_sources": {
+    "pt": "<colab_drive_export>/yolo11n_20261120_640_full120\\weights\\best.pt",
+    "results_csv": "<colab_drive_export>/yolo11n_20261120_640_full120\\results.csv"
+  },
+  "source_group": "custom",
+  "paper_core": true,
+  "legacy_id": "g3_v11n_6cls_640_gregv4_full120",
+  "display_name": "YOLO11n-640"
+}

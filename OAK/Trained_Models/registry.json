@@ -1,0 +1,493 @@
+{
+  "schema_version": "1.1",
+  "generated_at_utc": "2026-11-25T09:34:16+00:00",
+  "scope": "3D cup-orientation YOLO models only (2D tray detector, ArUco detector, and v11Z.blob excluded)",
+  "canonical_labels": [
+    "Back",
+    "Front",
+    "left_side",
+    "right_side",
+    "upright",
+    "upside_down"
+  ],
+  "excluded_models": [
+    {
+      "name": "models/A1119/best.pt",
+      "reason": "2D dishwasher tray slot occupancy detector (YOLO11s, 1 class: upside_down); out of 3D scope"
+    },
+    {
+      "name": "Dishwasher-Robot-HT26/Python/3D_Vision/blob_aruco/best_1*",
+      "reason": "Legacy hand-eye calibration ArUco detector (1 class: ArUco); out of cup-orientation scope"
+    },
+    {
+      "name": "models/v11Z.blob",
+      "reason": "Skipped per user instruction (unverified single-head 640x640 7-class blob)"
+    },
+    {
+      "name": "Drive: paper_cup_yolov5s/v5s_416_20261116_130157",
+      "reason": "Interrupted 27-epoch run with unstripped 85MB checkpoint, superseded 12 min later by v5s_416_20261116_131354"
+    }
+  ],
+  "models": [
+    {
+      "model_id": "marc_v5s_640",
+      "generation": "G1",
+      "architecture": "YOLOv5s",
+      "num_classes": 8,
+      "source_labels": [
+        "Back",
+        "Front",
+        "Gripper",
+        "handle",
+        "left_side",
+        "right_side",
+        "upright",
+        "upside_down"
+      ],
+      "source_id_to_canonical": {
+        "0": 0,
+        "1": 1,
+        "2": null,
+        "3": null,
+        "4": 2,
+        "5": 3,
+        "6": 4,
+        "7": 5
+      },
+      "input_size": [
+        640,
+        640
+      ],
+      "shaves": 5,
+      "deploy_preprocess_note": "720p RGB center-crop to 640x640 in A1119/camera_setup.py",
+      "source_origin": "Inherited from previous MARC / Dishwasher-Robot-HT26 project",
+      "notes": "Baseline inherited 8-class model (includes Gripper, handle); no .pt or training logs available locally.",
+      "artifacts": {
+        "pt": null,
+        "onnx": null,
+        "blob": "../Vision_System/models/marc_v5s_640/marc_v5s_640_5shave.blob",
+        "depthai_config": "models/marc_v5s_640/config/depthai_config.json",
+        "results_csv": null
+      },
+      "extra_configs": [],
+      "training_plots": {},
+      "sha256": {
+        "onnx": "38365a5c10edc14bbddcd8dd311dab6de306a2b94daffa8367e624472fda6182",
+        "blob": "67728f2d273942780448b9046a3d48599219f1d1a16c650229657245e7962001",
+        "depthai_config": "b186738d62186dd4728c667e236c2e98fb52e3b24315cd8adec6d92e6fd9ffec"
+      },
+      "training": {
+        "dataset": "MARC legacy (undocumented)",
+        "init_weights": "unknown",
+        "trained_date": "pre-2026-09-10"
+      },
+      "original_sources": {
+        "onnx": "<workspace>/Dishwasher-Robot-HT26\\Python\\3D_Vision\\blob_v5\\best_Yolo5_small-simplified.onnx",
+        "blob": "<workspace>/models\\A1119\\blob_v5\\best_Yolo5_small_openvino_2022.1_5shave.blob",
+        "depthai_config": "<workspace>/models\\A1119\\blob_v5\\best_Yolo5_small.json"
+      },
+      "source_group": "marc",
+      "paper_core": true,
+      "legacy_id": "g1_v5s_8cls_640_marc",
+      "display_name": "MARC-v5s-640"
+    },
+    {
+      "model_id": "ft_marc_v5s_416",
+      "generation": "G2",
+      "architecture": "YOLOv5s",
+      "num_classes": 7,
+      "source_labels": [
+        "Back",
+        "Front",
+        "Gripper",
+        "left_side",
+        "right_side",
+        "upright",
+        "upside_down"
+      ],
+      "source_id_to_canonical": {
+        "0": 0,
+        "1": 1,
+        "2": null,
+        "3": 2,
+        "4": 3,
+        "5": 4,
+        "6": 5
+      },
+      "input_size": [
+        416,
+        416
+      ],
+      "shaves": 5,
+      "deploy_preprocess_note": "1080p RGB stretched (keepAspectRatio=False) in A1119/camera_setup.py",
+      "source_origin": "Fine-tuned MARC baseline (complete_v3 / aug_v1)",
+      "notes": "Fine-tuned MARC ablation matrix anchor with full .pt, results.csv, curves; also used as fine-tune base for G3 v5s.",
+      "artifacts": {
+        "pt": null,
+        "onnx": null,
+        "blob": "../Vision_System/models/ft_marc_v5s_416/ft_marc_v5s_416_5shave.blob",
+        "depthai_config": "models/ft_marc_v5s_416/config/depthai_config.json",
+        "results_csv": "models/ft_marc_v5s_416/training/results.csv"
+      },
+      "extra_configs": [
+        "config.json",
+        "depthai_v2.json",
+        "buildinfo.json",
+        "conversion.json",
+        "config_legacy.json"
+      ],
+      "training_plots": {
+        "fit": [
+          "confusion_matrix.png",
+          "F1_curve.png",
+          "P_curve.png",
+          "PR_curve.png",
+          "R_curve.png",
+          "results.png"
+        ],
+        "validation": [
+          "confusion_matrix.png",
+          "F1_curve.png",
+          "P_curve.png",
+          "PR_curve.png",
+          "R_curve.png"
+        ]
+      },
+      "sha256": {
+        "pt": "ed172cba281c7a3be47232c4e17d959d2fa407572f5a463dc21d2b8d1a876edd",
+        "blob": "8b0376d47eee10f8bf207d870158bfc9286ed7f3de3b26aaa3f1ea7a458a64dd",
+        "depthai_config": "1a933f17e7e774e3214d0a10233e98db0f1263b029b2a7bb15265c0b481769d8",
+        "results_csv": "1280bf6dfe5b58b57122ee9f377ff64108f69f83828f33e22fde2da62c65c227"
+      },
+      "training": {
+        "dataset": "complete_v3 (aug_v1)",
+        "init_weights": "yolov5s.pt",
+        "trained_date": "2026-09-29",
+        "epochs_planned": 150,
+        "batch_size": 16,
+        "gpu": "NVIDIA GeForce RTX 4080 SUPER",
+        "epochs_completed": 150,
+        "best_val_metrics": {
+          "epoch": 148,
+          "precision": 0.9674,
+          "recall": 0.9522,
+          "mAP50": 0.9809,
+          "mAP50_95": 0.871
+        },
+        "last_val_metrics": {
+          "epoch": 149,
+          "precision": 0.963,
+          "recall": 0.9565,
+          "mAP50": 0.9809,
+          "mAP50_95": 0.8706
+        }
+      },
+      "original_sources": {
+        "pt": "<workspace>/models\\yolov5s_416withpt\\fit\\weights\\best.pt",
+        "blob": "<workspace>/models\\v5s_aug_416\\best.blob",
+        "depthai_config": "<workspace>/models\\v5s_aug_416\\config_legacy.json",
+        "results_csv": "<workspace>/models\\yolov5s_416withpt\\fit\\results.csv"
+      },
+      "source_group": "ft_marc",
+      "paper_core": true,
+      "legacy_id": "g2_v5s_7cls_416_aug",
+      "display_name": "FT-MARC-v5s-416"
+    },
+    {
+      "model_id": "yolov5s_416",
+      "generation": "G3",
+      "architecture": "YOLOv5s",
+      "num_classes": 6,
+      "source_labels": [
+        "Back",
+        "Front",
+        "left_side",
+        "right_side",
+        "upright",
+        "upside_down"
+      ],
+      "source_id_to_canonical": {
+        "0": 0,
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5
+      },
+      "input_size": [
+        416,
+        416
+      ],
+      "shaves": 5,
+      "deploy_preprocess_note": "Compiled to 5-SHAVE RVC2 OpenVINO 2022.1 FP16 blob via Luxonis tools; hardware inference pending",
+      "source_origin": "Google Colab / Drive (paper_cup_yolov5s/v5s_416_full120_20261124_122733)",
+      "notes": "Latest full 120-epoch YOLOv5s 416 trained on 2026_GreG-4 (from yolov5s.pt, patience=0, batch=8); directly pairs with yolo11n_416.",
+      "artifacts": {
+        "pt": null,
+        "onnx": null,
+        "blob": "../Vision_System/models/yolov5s_416/yolov5s_416_5shave.blob",
+        "depthai_config": "models/yolov5s_416/config/depthai_config.json",
+        "results_csv": "models/yolov5s_416/training/results.csv"
+      },
+      "extra_configs": [
+        "conversion_verification.json"
+      ],
+      "training_plots": {
+        "fit": [
+          "confusion_matrix.png",
+          "F1_curve.png",
+          "P_curve.png",
+          "PR_curve.png",
+          "R_curve.png",
+          "results.png"
+        ],
+        "validation_readable": [
+          "confusion_matrix.png",
+          "F1_curve.png",
+          "P_curve.png",
+          "PR_curve.png",
+          "R_curve.png"
+        ]
+      },
+      "sha256": {
+        "pt": "741b24c5e798da1fb1b1c8f9633e8bd934c013b844cc106d6e40ea43561b1f6d",
+        "results_csv": "96c0a570d8d09d6cb82543f82d94e8ad74e214da0462265db1307edcde7ab216",
+        "blob": "be36f4b82feaa2f4781366560922ed84fc602144c1d6523da75066088769ae6e",
+        "onnx": "99fa079f62cbd4fcbaad59902dd3df63f2e56f8ec1115bab505fab9e61f3bfff",
+        "depthai_config": "53305e1c2c2ccda4a7e3510fccc67151ac19502313317268fb59aa83272a752c"
+      },
+      "training": {
+        "dataset": "2026_GreG-4",
+        "init_weights": "yolov5s.pt (COCO)",
+        "epochs_planned": 120,
+        "batch_size": 8,
+        "patience": 0,
+        "optimizer": "AdamW",
+        "trained_date": "2026-11-24",
+        "epochs_completed": 120,
+        "best_val_metrics": {
+          "epoch": 83,
+          "precision": 0.901,
+          "recall": 0.9298,
+          "mAP50": 0.928,
+          "mAP50_95": 0.7744
+        },
+        "last_val_metrics": {
+          "epoch": 119,
+          "precision": 0.9292,
+          "recall": 0.8707,
+          "mAP50": 0.9112,
+          "mAP50_95": 0.7561
+        }
+      },
+      "original_sources": {
+        "pt": "<colab_drive_export>/yolov5s_20261124_full120\\weights\\best.pt",
+        "results_csv": "<colab_drive_export>/yolov5s_20261124_full120\\results.csv"
+      },
+      "source_group": "custom",
+      "paper_core": true,
+      "legacy_id": "g3_v5s_6cls_416_gregv4_full120",
+      "display_name": "YOLOv5s-416"
+    },
+    {
+      "model_id": "yolo11n_416",
+      "generation": "G3",
+      "architecture": "YOLO11n",
+      "num_classes": 6,
+      "source_labels": [
+        "Back",
+        "Front",
+        "left_side",
+        "right_side",
+        "upright",
+        "upside_down"
+      ],
+      "source_id_to_canonical": {
+        "0": 0,
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5
+      },
+      "input_size": [
+        416,
+        416
+      ],
+      "shaves": 5,
+      "deploy_preprocess_note": "Compiled to 5-SHAVE RVC2 blob (v11ng3); hardware inference pending verification",
+      "source_origin": "Local (models/v11ng3) + Drive (paper_cup_yolo11/paper_cups_416_full120_20261119_114137, exact SHA256 match)",
+      "notes": "Round-3 full 120-epoch YOLO11n 416 on 2026_GreG-4 (patience=0, batch=8). Complete .pt/.onnx/.blob + Drive results.csv & test_evaluation.",
+      "artifacts": {
+        "pt": null,
+        "onnx": null,
+        "blob": "../Vision_System/models/yolo11n_416/yolo11n_416_5shave.blob",
+        "depthai_config": "models/yolo11n_416/config/depthai_config.json",
+        "results_csv": "models/yolo11n_416/training/results.csv"
+      },
+      "extra_configs": [
+        "verification.json"
+      ],
+      "training_plots": {
+        "fit": [
+          "BoxF1_curve.png",
+          "BoxP_curve.png",
+          "BoxPR_curve.png",
+          "BoxR_curve.png",
+          "confusion_matrix.png",
+          "confusion_matrix_normalized.png",
+          "results.png"
+        ],
+        "test_evaluation": [
+          "BoxF1_curve.png",
+          "BoxP_curve.png",
+          "BoxPR_curve.png",
+          "BoxR_curve.png",
+          "confusion_matrix.png",
+          "confusion_matrix_normalized.png"
+        ]
+      },
+      "sha256": {
+        "pt": "67af9bd242877791e8b51b56450826fcec8e032383237437fbb6a5943ce6785c",
+        "onnx": "3ce172c0e3e0c6b6497b1e7e6aa821ead9d9fe7cf29aedaf580b57e95a72b6fa",
+        "blob": "2baafe6716c9c00b09db0443d98b574282bfa2f31fcaf8211ba4ef57ed71385b",
+        "depthai_config": "25a0396f39f5462d2788124f2a0eeb2f294ba929115ae04961c3c93a9fac4a49",
+        "results_csv": "2f20b2e3978f2ddf463ef7c5e20cce5b089ba39e987ad549167fe282fbfa16ae"
+      },
+      "training": {
+        "dataset": "2026_GreG-4",
+        "init_weights": "yolo11n.pt (COCO)",
+        "epochs_planned": 120,
+        "batch_size": 8,
+        "patience": 0,
+        "optimizer": "auto",
+        "trained_date": "2026-11-19",
+        "epochs_completed": 120,
+        "best_val_metrics": {
+          "epoch": 106,
+          "precision": 0.931,
+          "recall": 0.9372,
+          "mAP50": 0.9354,
+          "mAP50_95": 0.7782
+        },
+        "last_val_metrics": {
+          "epoch": 120,
+          "precision": 0.9027,
+          "recall": 0.9465,
+          "mAP50": 0.9233,
+          "mAP50_95": 0.7575
+        }
+      },
+      "original_sources": {
+        "pt": "<workspace>/models\\v11ng3\\v11nr3.pt",
+        "onnx": "<workspace>/models\\v11ng3\\blob_416_5shaves\\v11nr3-simplified.onnx",
+        "blob": "<workspace>/models\\v11ng3\\blob_416_5shaves\\v11nr3_openvino_2022.1_5shave.blob",
+        "depthai_config": "<workspace>/models\\v11ng3\\blob_416_5shaves\\v11nr3.json",
+        "results_csv": "<colab_drive_export>/yolo11n_20261119_full120\\results.csv"
+      },
+      "source_group": "custom",
+      "paper_core": true,
+      "legacy_id": "g3_v11n_6cls_416_gregv4_full120",
+      "display_name": "YOLO11n-416"
+    },
+    {
+      "model_id": "yolo11n_640",
+      "generation": "G3",
+      "architecture": "YOLO11n",
+      "num_classes": 6,
+      "source_labels": [
+        "Back",
+        "Front",
+        "left_side",
+        "right_side",
+        "upright",
+        "upside_down"
+      ],
+      "source_id_to_canonical": {
+        "0": 0,
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5
+      },
+      "input_size": [
+        640,
+        640
+      ],
+      "shaves": 5,
+      "deploy_preprocess_note": "Compiled to 5-SHAVE RVC2 OpenVINO 2022.1 FP16 blob via Luxonis tools; hardware inference pending",
+      "source_origin": "Google Colab / Drive (paper_cup_yolo11/paper_cups_640_full120_20261120_101123)",
+      "notes": "640x640 resolution control run on 2026_GreG-4 (120 ep, patience=0, batch=8); directly pairs with yolo11n_416.",
+      "artifacts": {
+        "pt": null,
+        "onnx": null,
+        "blob": "../Vision_System/models/yolo11n_640/yolo11n_640_5shave.blob",
+        "depthai_config": "models/yolo11n_640/config/depthai_config.json",
+        "results_csv": "models/yolo11n_640/training/results.csv"
+      },
+      "extra_configs": [
+        "conversion_verification.json"
+      ],
+      "training_plots": {
+        "fit": [
+          "BoxF1_curve.png",
+          "BoxP_curve.png",
+          "BoxPR_curve.png",
+          "BoxR_curve.png",
+          "confusion_matrix.png",
+          "confusion_matrix_normalized.png",
+          "results.png"
+        ]
+      },
+      "sha256": {
+        "pt": "7cd3a174fc9615672063f3e63cf9a943c5d9129cd0f0a7c5a7ef22241fa8b245",
+        "results_csv": "8910850b041fbd7bdeeefcb71f58cf41ed2ff320f7f5b977aff318e5f23e5bdd",
+        "blob": "74713b2e318071aad663a03fb8a53e1fd686b7f2fdced3ce25a9ea4b472ef10e",
+        "onnx": "90e7adc0f4c9e22cee755290702f5a44693332fafa7beda5efb64b543993cb7e",
+        "depthai_config": "a00607873d6306aa2e6cca1f1930917ffe56e386352070409473ac946fea5c78"
+      },
+      "training": {
+        "dataset": "2026_GreG-4",
+        "init_weights": "yolo11n.pt (COCO)",
+        "epochs_planned": 120,
+        "batch_size": 8,
+        "patience": 0,
+        "optimizer": "auto",
+        "trained_date": "2026-11-20",
+        "epochs_completed": 120,
+        "best_val_metrics": {
+          "epoch": 37,
+          "precision": 0.9197,
+          "recall": 0.8989,
+          "mAP50": 0.9413,
+          "mAP50_95": 0.795
+        },
+        "last_val_metrics": {
+          "epoch": 120,
+          "precision": 0.9195,
+          "recall": 0.9003,
+          "mAP50": 0.9103,
+          "mAP50_95": 0.7442
+        }
+      },
+      "original_sources": {
+        "pt": "<colab_drive_export>/yolo11n_20261120_640_full120\\weights\\best.pt",
+        "results_csv": "<colab_drive_export>/yolo11n_20261120_640_full120\\results.csv"
+      },
+      "source_group": "custom",
+      "paper_core": true,
+      "legacy_id": "g3_v11n_6cls_640_gregv4_full120",
+      "display_name": "YOLO11n-640"
+    }
+  ],
+  "presets": {
+    "paper5": [
+      "marc_v5s_640",
+      "ft_marc_v5s_416",
+      "yolov5s_416",
+      "yolo11n_416",
+      "yolo11n_640"
+    ]
+  }
+}

@@ -1,0 +1,32 @@
+% Controlled 2026_GreG-4 ablation tables extracted from archived Colab notebooks.
+% Requires \usepackage{booktabs}
+
+\begin{table}[t]
+  \centering
+  \caption{Controlled architecture and input-resolution ablation on the \texttt{2026\_GreG-4} validation split (26 images, 78 instances; all models trained for 120 epochs, batch size 8, no early stopping).}
+  \label{tab:greg4-val-ablation}
+  \begin{tabular}{lccccccc}
+    \toprule
+    Model & Input & Params & GFLOPs & P & R & mAP@50 & mAP@50:95 \\
+    \midrule
+    YOLOv5s & $416\times416$ & 7.03M & 15.8 & 0.915 & 0.899 & 0.934 & 0.775 \\
+    YOLO11n & $416\times416$ & 2.60M & 6.4  & \textbf{0.931} & \textbf{0.937} & 0.935 & 0.779 \\
+    YOLO11n & $640\times640$ & 2.60M & 6.4  & 0.920 & 0.899 & \textbf{0.941} & \textbf{0.796} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[t]
+  \centering
+  \caption{Dataset-version and training-schedule ablation for YOLO11n ($416\times416$) on the Roboflow 22-image test split (62 instances in \texttt{GreG-2}; 63 instances in \texttt{GreG-4}).}
+  \label{tab:greg-test-ablation}
+  \begin{tabular}{llccccc}
+    \toprule
+    Dataset & Schedule & Epochs & P & R & mAP@50 & mAP@50:95 \\
+    \midrule
+    \texttt{2026\_GreG-2} & Early stop (patience 20) & 38  & 0.733 & 0.683 & 0.672 & 0.556 \\
+    \texttt{2026\_GreG-4} & Early stop (patience 20) & 37  & 0.908 & 0.919 & 0.951 & 0.788 \\
+    \texttt{2026\_GreG-4} & Full training (patience 0) & 120 & \textbf{0.954} & \textbf{0.939} & \textbf{0.957} & \textbf{0.796} \\
+    \bottomrule
+  \end{tabular}
+\end{table}

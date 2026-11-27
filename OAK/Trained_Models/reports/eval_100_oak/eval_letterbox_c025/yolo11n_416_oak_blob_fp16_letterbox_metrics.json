@@ -1,0 +1,178 @@
+{
+  "model_id": "yolo11n_416",
+  "display_name": "YOLO11n-416",
+  "runtime": "oak_blob_fp16",
+  "preprocess": "letterbox",
+  "predictions_file": "preds/yolo11n_416_oak_letterbox.jsonl",
+  "dataset_dir": "independent_test_set_100",
+  "latency_summary": {
+    "count": 100,
+    "mean_ms": 75.86,
+    "p50_ms": 75.17,
+    "p95_ms": 76.48,
+    "fps": 13.18
+  },
+  "overall": {
+    "num_images": 100,
+    "total_gt_instances": 341,
+    "operating_point": {
+      "conf": 0.25,
+      "iou": 0.5
+    },
+    "macro": {
+      "precision": 0.9399,
+      "recall": 0.8109,
+      "f1": 0.867,
+      "mAP50": 0.868,
+      "mAP50_95": 0.724
+    },
+    "empty_scenes": {
+      "num_empty_images": 8,
+      "fp_images": 0,
+      "fp_image_rate": 0.0,
+      "fp_total": 0,
+      "fp_per_empty_image": 0.0
+    },
+    "auxiliary_class_audit": {},
+    "per_class": {
+      "Back": {
+        "gt_instances": 62,
+        "pred_total": 54,
+        "tp_at_op": 46,
+        "fp_at_op": 0,
+        "fn_at_op": 16,
+        "precision": 1.0,
+        "recall": 0.7419,
+        "f1": 0.8519,
+        "ap50": 0.77,
+        "ap50_95": 0.6532
+      },
+      "Front": {
+        "gt_instances": 31,
+        "pred_total": 44,
+        "tp_at_op": 26,
+        "fp_at_op": 8,
+        "fn_at_op": 5,
+        "precision": 0.7647,
+        "recall": 0.8387,
+        "f1": 0.8,
+        "ap50": 0.8191,
+        "ap50_95": 0.6963
+      },
+      "left_side": {
+        "gt_instances": 34,
+        "pred_total": 39,
+        "tp_at_op": 23,
+        "fp_at_op": 2,
+        "fn_at_op": 11,
+        "precision": 0.92,
+        "recall": 0.6765,
+        "f1": 0.7797,
+        "ap50": 0.8767,
+        "ap50_95": 0.6959
+      },
+      "right_side": {
+        "gt_instances": 25,
+        "pred_total": 42,
+        "tp_at_op": 23,
+        "fp_at_op": 0,
+        "fn_at_op": 2,
+        "precision": 1.0,
+        "recall": 0.92,
+        "f1": 0.9583,
+        "ap50": 0.9573,
+        "ap50_95": 0.7923
+      },
+      "upright": {
+        "gt_instances": 129,
+        "pred_total": 130,
+        "tp_at_op": 106,
+        "fp_at_op": 5,
+        "fn_at_op": 23,
+        "precision": 0.955,
+        "recall": 0.8217,
+        "f1": 0.8833,
+        "ap50": 0.8846,
+        "ap50_95": 0.7279
+      },
+      "upside_down": {
+        "gt_instances": 60,
+        "pred_total": 58,
+        "tp_at_op": 52,
+        "fp_at_op": 0,
+        "fn_at_op": 8,
+        "precision": 1.0,
+        "recall": 0.8667,
+        "f1": 0.9286,
+        "ap50": 0.9003,
+        "ap50_95": 0.7788
+      }
+    },
+    "confusion_matrix": [
+      [
+        46,
+        4,
+        1,
+        0,
+        0,
+        0,
+        11
+      ],
+      [
+        0,
+        26,
+        0,
+        0,
+        0,
+        0,
+        5
+      ],
+      [
+        0,
+        0,
+        23,
+        0,
+        0,
+        0,
+        11
+      ],
+      [
+        0,
+        0,
+        0,
+        23,
+        0,
+        0,
+        2
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        106,
+        0,
+        23
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        2,
+        52,
+        6
+      ],
+      [
+        0,
+        4,
+        1,
+        0,
+        3,
+        0,
+        0
+      ]
+    ]
+  },
+  "subgroups": {}
+}

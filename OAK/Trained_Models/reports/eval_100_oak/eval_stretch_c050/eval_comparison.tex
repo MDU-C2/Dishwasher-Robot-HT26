@@ -1,0 +1,16 @@
+\begin{table}[t]
+  \centering
+  \caption{Unified 6-class cup orientation detection comparison on the evaluation dataset.}
+  \label{tab:yolo-comparison}
+  \begin{tabular}{lllcccccc}
+    \toprule
+    Model & Runtime & Prep. & P & R & F1 & mAP@50 & mAP@50:95 & Lat. (ms) \\
+    \midrule
+    FT-MARC-v5s-416 & oak\_blob\_fp16 & stretch & 0.856 & 0.547 & 0.652 & 0.667 & 0.469 & 95.5 \\
+    MARC-v5s-640 & oak\_blob\_fp16 & stretch & 0.749 & 0.322 & 0.400 & 0.583 & 0.400 & 259.0 \\
+    YOLO11n-416 & oak\_blob\_fp16 & stretch & 0.959 & 0.948 & 0.953 & 0.961 & 0.857 & 75.6 \\
+    YOLO11n-640 & oak\_blob\_fp16 & stretch & 0.983 & 0.976 & 0.979 & 0.978 & 0.879 & 155.0 \\
+    YOLOv5s-416 & oak\_blob\_fp16 & stretch & 0.967 & 0.960 & 0.963 & 0.970 & 0.850 & 94.3 \\
+    \bottomrule
+  \end{tabular}
+\end{table}

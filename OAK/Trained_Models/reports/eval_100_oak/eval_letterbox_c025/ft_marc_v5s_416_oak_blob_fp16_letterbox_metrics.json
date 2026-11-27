@@ -1,0 +1,180 @@
+{
+  "model_id": "ft_marc_v5s_416",
+  "display_name": "FT-MARC-v5s-416",
+  "runtime": "oak_blob_fp16",
+  "preprocess": "letterbox",
+  "predictions_file": "preds/ft_marc_v5s_416_oak_letterbox.jsonl",
+  "dataset_dir": "independent_test_set_100",
+  "latency_summary": {
+    "count": 100,
+    "mean_ms": 94.64,
+    "p50_ms": 92.54,
+    "p95_ms": 97.06,
+    "fps": 10.57
+  },
+  "overall": {
+    "num_images": 100,
+    "total_gt_instances": 341,
+    "operating_point": {
+      "conf": 0.25,
+      "iou": 0.5
+    },
+    "macro": {
+      "precision": 0.904,
+      "recall": 0.7782,
+      "f1": 0.8298,
+      "mAP50": 0.8022,
+      "mAP50_95": 0.625
+    },
+    "empty_scenes": {
+      "num_empty_images": 8,
+      "fp_images": 1,
+      "fp_image_rate": 0.125,
+      "fp_total": 1,
+      "fp_per_empty_image": 0.125
+    },
+    "auxiliary_class_audit": {
+      "Gripper": 1
+    },
+    "per_class": {
+      "Back": {
+        "gt_instances": 62,
+        "pred_total": 53,
+        "tp_at_op": 43,
+        "fp_at_op": 0,
+        "fn_at_op": 19,
+        "precision": 1.0,
+        "recall": 0.6935,
+        "f1": 0.819,
+        "ap50": 0.7899,
+        "ap50_95": 0.6207
+      },
+      "Front": {
+        "gt_instances": 31,
+        "pred_total": 36,
+        "tp_at_op": 30,
+        "fp_at_op": 4,
+        "fn_at_op": 1,
+        "precision": 0.8824,
+        "recall": 0.9677,
+        "f1": 0.9231,
+        "ap50": 0.954,
+        "ap50_95": 0.7241
+      },
+      "left_side": {
+        "gt_instances": 34,
+        "pred_total": 28,
+        "tp_at_op": 19,
+        "fp_at_op": 3,
+        "fn_at_op": 15,
+        "precision": 0.8636,
+        "recall": 0.5588,
+        "f1": 0.6786,
+        "ap50": 0.5578,
+        "ap50_95": 0.405
+      },
+      "right_side": {
+        "gt_instances": 25,
+        "pred_total": 40,
+        "tp_at_op": 17,
+        "fp_at_op": 6,
+        "fn_at_op": 8,
+        "precision": 0.7391,
+        "recall": 0.68,
+        "f1": 0.7083,
+        "ap50": 0.654,
+        "ap50_95": 0.5071
+      },
+      "upright": {
+        "gt_instances": 129,
+        "pred_total": 178,
+        "tp_at_op": 110,
+        "fp_at_op": 5,
+        "fn_at_op": 19,
+        "precision": 0.9565,
+        "recall": 0.8527,
+        "f1": 0.9016,
+        "ap50": 0.9299,
+        "ap50_95": 0.7078
+      },
+      "upside_down": {
+        "gt_instances": 60,
+        "pred_total": 189,
+        "tp_at_op": 55,
+        "fp_at_op": 1,
+        "fn_at_op": 5,
+        "precision": 0.9821,
+        "recall": 0.9167,
+        "f1": 0.9483,
+        "ap50": 0.9277,
+        "ap50_95": 0.7853
+      }
+    },
+    "confusion_matrix": [
+      [
+        43,
+        1,
+        0,
+        4,
+        2,
+        0,
+        12
+      ],
+      [
+        0,
+        30,
+        0,
+        0,
+        0,
+        0,
+        1
+      ],
+      [
+        0,
+        3,
+        19,
+        1,
+        1,
+        0,
+        10
+      ],
+      [
+        0,
+        0,
+        3,
+        17,
+        1,
+        0,
+        4
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        110,
+        0,
+        19
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        55,
+        5
+      ],
+      [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        0
+      ]
+    ]
+  },
+  "subgroups": {}
+}

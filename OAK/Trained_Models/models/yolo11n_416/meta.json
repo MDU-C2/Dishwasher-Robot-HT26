@@ -1,0 +1,101 @@
+{
+  "model_id": "yolo11n_416",
+  "generation": "G3",
+  "architecture": "YOLO11n",
+  "num_classes": 6,
+  "source_labels": [
+    "Back",
+    "Front",
+    "left_side",
+    "right_side",
+    "upright",
+    "upside_down"
+  ],
+  "source_id_to_canonical": {
+    "0": 0,
+    "1": 1,
+    "2": 2,
+    "3": 3,
+    "4": 4,
+    "5": 5
+  },
+  "input_size": [
+    416,
+    416
+  ],
+  "shaves": 5,
+  "deploy_preprocess_note": "Compiled to 5-SHAVE RVC2 blob (v11ng3); hardware inference pending verification",
+  "source_origin": "Local (models/v11ng3) + Drive (paper_cup_yolo11/paper_cups_416_full120_20261119_114137, exact SHA256 match)",
+  "notes": "Round-3 full 120-epoch YOLO11n 416 on 2026_GreG-4 (patience=0, batch=8). Complete .pt/.onnx/.blob + Drive results.csv & test_evaluation.",
+  "artifacts": {
+    "pt": null,
+    "onnx": null,
+    "blob": "../Vision_System/models/yolo11n_416/yolo11n_416_5shave.blob",
+    "depthai_config": "models/yolo11n_416/config/depthai_config.json",
+    "results_csv": "models/yolo11n_416/training/results.csv"
+  },
+  "extra_configs": [
+    "verification.json"
+  ],
+  "training_plots": {
+    "fit": [
+      "BoxF1_curve.png",
+      "BoxP_curve.png",
+      "BoxPR_curve.png",
+      "BoxR_curve.png",
+      "confusion_matrix.png",
+      "confusion_matrix_normalized.png",
+      "results.png"
+    ],
+    "test_evaluation": [
+      "BoxF1_curve.png",
+      "BoxP_curve.png",
+      "BoxPR_curve.png",
+      "BoxR_curve.png",
+      "confusion_matrix.png",
+      "confusion_matrix_normalized.png"
+    ]
+  },
+  "sha256": {
+    "pt": "67af9bd242877791e8b51b56450826fcec8e032383237437fbb6a5943ce6785c",
+    "onnx": "3ce172c0e3e0c6b6497b1e7e6aa821ead9d9fe7cf29aedaf580b57e95a72b6fa",
+    "blob": "2baafe6716c9c00b09db0443d98b574282bfa2f31fcaf8211ba4ef57ed71385b",
+    "depthai_config": "25a0396f39f5462d2788124f2a0eeb2f294ba929115ae04961c3c93a9fac4a49",
+    "results_csv": "2f20b2e3978f2ddf463ef7c5e20cce5b089ba39e987ad549167fe282fbfa16ae"
+  },
+  "training": {
+    "dataset": "2026_GreG-4",
+    "init_weights": "yolo11n.pt (COCO)",
+    "epochs_planned": 120,
+    "batch_size": 8,
+    "patience": 0,
+    "optimizer": "auto",
+    "trained_date": "2026-11-19",
+    "epochs_completed": 120,
+    "best_val_metrics": {
+      "epoch": 106,
+      "precision": 0.931,
+      "recall": 0.9372,
+      "mAP50": 0.9354,
+      "mAP50_95": 0.7782
+    },
+    "last_val_metrics": {
+      "epoch": 120,
+      "precision": 0.9027,
+      "recall": 0.9465,
+      "mAP50": 0.9233,
+      "mAP50_95": 0.7575
+    }
+  },
+  "original_sources": {
+    "pt": "<workspace>/models\\v11ng3\\v11nr3.pt",
+    "onnx": "<workspace>/models\\v11ng3\\blob_416_5shaves\\v11nr3-simplified.onnx",
+    "blob": "<workspace>/models\\v11ng3\\blob_416_5shaves\\v11nr3_openvino_2022.1_5shave.blob",
+    "depthai_config": "<workspace>/models\\v11ng3\\blob_416_5shaves\\v11nr3.json",
+    "results_csv": "<colab_drive_export>/yolo11n_20261119_full120\\results.csv"
+  },
+  "source_group": "custom",
+  "paper_core": true,
+  "legacy_id": "g3_v11n_6cls_416_gregv4_full120",
+  "display_name": "YOLO11n-416"
+}
