@@ -24,10 +24,11 @@ def set_fsr_calibration(
     grip_threshold: int,
     max_threshold: int,
     invert_close: bool = False,
+    fsr_enabled: bool = True,
 ) -> str:
     return (
         f"FSRCAL,{finger_index},{contact_threshold},"
-        f"{grip_threshold},{max_threshold},{int(invert_close)}\n"
+        f"{grip_threshold},{max_threshold},{int(invert_close)},{int(fsr_enabled)}\n"
     )
 
 
@@ -62,16 +63,20 @@ def set_lidar_and_loop_config(
     release_ms: int,
     boost_step: int,
     hold_deadband: int,
-    grip_timeout_ms: int = 4000,
+    grip_timeout_ms: int = 2200,
+    slip_speed_pct: int = 14,
 ) -> str:
     return (
         f"LOOPCAL,{trigger_mm},{dwell_ms},{slip_vel_mm_s},"
-        f"{release_ms},{boost_step},{hold_deadband},{grip_timeout_ms}\n"
+        f"{release_ms},{boost_step},{hold_deadband},"
+        f"{grip_timeout_ms},{slip_speed_pct}\n"
     )
 
 
-def set_auto_modes(auto_lidar_grip: bool, closed_loop_hold: bool) -> str:
-    return f"AUTOMODE,{int(auto_lidar_grip)},{int(closed_loop_hold)}\n"
+def set_auto_modes(
+    auto_lidar_grip: bool, slip_detection: bool, force_hold: bool = True
+) -> str:
+    return f"AUTOMODE,{int(auto_lidar_grip)},{int(slip_detection)},{int(force_hold)}\n"
 
 
 def parse_line(line: str) -> tuple[str, list[str]]:

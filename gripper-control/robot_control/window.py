@@ -23,17 +23,18 @@ from .config import (
     DEFAULT_LIDAR_SLIP_VELOCITY_MM_S, DEFAULT_LIDAR_TRIGGER_MM,
     DEFAULT_MAX_SPEED_DEG_S, DEFAULT_OPTICAL_MOTION_THRESHOLD,
     DEFAULT_OPTICAL_SQUAL_THRESHOLD, DEFAULT_RELEASE_DURATION_MS,
-    DEFAULT_SLIP_BOOST_STEP, FSR_PINS, FSR_STATE_LABELS,
-    GRIP_CONTROLLER_LABELS, LIDAR_I2C_BUS, LIDAR_STATE_LABELS,
+    DEFAULT_SLIP_BOOST_STEP, DEFAULT_SLIP_TIGHTEN_SPEED_PCT, FSR_PINS,
+    FSR_STATE_LABELS, GRIP_CONTROLLER_LABELS, LIDAR_I2C_BUS, LIDAR_STATE_LABELS,
     MAX_ACCELERATION_DEG_S2, MAX_ANGLE, MAX_FORCE_HOLD_DEADBAND,
     MAX_FSR_THRESHOLD, MAX_GRIP_TIMEOUT_MS, MAX_LIDAR_DWELL_MS,
     MAX_LIDAR_SLIP_VELOCITY_MM_S, MAX_LIDAR_TRIGGER_MM, MAX_MAX_SPEED_DEG_S,
     MAX_OPTICAL_MOTION_THRESHOLD, MAX_OPTICAL_SQUAL_THRESHOLD,
-    MAX_RELEASE_DURATION_MS, MAX_SLIP_BOOST_STEP, MIN_ACCELERATION_DEG_S2,
-    MIN_ANGLE, MIN_FORCE_HOLD_DEADBAND, MIN_FSR_THRESHOLD, MIN_GRIP_TIMEOUT_MS,
-    MIN_LIDAR_DWELL_MS, MIN_LIDAR_SLIP_VELOCITY_MM_S, MIN_LIDAR_TRIGGER_MM,
-    MIN_MAX_SPEED_DEG_S, MIN_OPTICAL_MOTION_THRESHOLD,
-    MIN_OPTICAL_SQUAL_THRESHOLD, MIN_RELEASE_DURATION_MS, MIN_SLIP_BOOST_STEP,
+    MAX_RELEASE_DURATION_MS, MAX_SLIP_BOOST_STEP, MAX_SLIP_TIGHTEN_SPEED_PCT,
+    MIN_ACCELERATION_DEG_S2, MIN_ANGLE, MIN_FORCE_HOLD_DEADBAND,
+    MIN_FSR_THRESHOLD, MIN_GRIP_TIMEOUT_MS, MIN_LIDAR_DWELL_MS,
+    MIN_LIDAR_SLIP_VELOCITY_MM_S, MIN_LIDAR_TRIGGER_MM, MIN_MAX_SPEED_DEG_S,
+    MIN_OPTICAL_MOTION_THRESHOLD, MIN_OPTICAL_SQUAL_THRESHOLD,
+    MIN_RELEASE_DURATION_MS, MIN_SLIP_BOOST_STEP, MIN_SLIP_TIGHTEN_SPEED_PCT,
     OPTICAL_SPI_PINS, OPTICAL_STATE_LABELS, PULSE_MAX_ALLOWED_US,
     PULSE_MIN_ALLOWED_US, SERVO_CHANNELS, SLIP_STATE_LABELS,
 )
@@ -134,7 +135,7 @@ class DistanceHistoryWidget(QWidget):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, settings: QSettings | None = None):
         super().__init__()
         self.setWindowTitle(APP_TITLE)
         self.resize(1280, 900)
@@ -146,7 +147,7 @@ class MainWindow(QMainWindow):
         self._last_error = ""
         self._last_pong = 0.0
         self._reported_servo_count: int | None = None
-        self.settings = QSettings("MDU-C2", "Gripper Control")
+        self.settings = settings if settings is not None else QSettings("MDU-C2", "Gripper Control")
         self.cal_inputs: dict[int, tuple[QSpinBox, QSpinBox, QSpinBox]] = {}
         self.motion_enabled_boxes: dict[int, QCheckBox] = {}
         self.motion_speed_spins: dict[int, QSpinBox] = {}
@@ -158,18 +159,24 @@ class MainWindow(QMainWindow):
         self.fsr_grip_spins: dict[int, QSpinBox] = {}
         self.fsr_max_spins: dict[int, QSpinBox] = {}
         self.fsr_invert_boxes: dict[int, QCheckBox] = {}
+        self.fsr_enable_boxes: dict[int, QCheckBox] = {}
         self.fsr_cal_notes: dict[int, QLabel] = {}
         self._grip_sync_active = False
+        self._synced_channels: set[int] = set()
         self._opt_state = 3
         self._lidar_state = 3
         self._ctrl_state = 0
         self._slip_force_boost = 0
         self._slip_state = 0
         self._slip_confidence = 0
+        self._latest_fsr: dict[int, tuple[int, int, int]] = {
+            ch: (0, 0, 0) for ch in CONTINUOUS_SERVO_CHANNELS
+        }
         self.simple_sliders: dict[int, QSlider] = {}
         self.simple_angle_labels: dict[int, QLabel] = {}
         self.simple_fsr_bars: dict[int, QProgressBar] = {}
         self.simple_fsr_labels: dict[int, QLabel] = {}
+        self.simple_fsr_checkboxes: dict[int, QCheckBox] = {}
         self._cal_arm_widgets: list[QWidget] = []
         self._cal_finger_widgets: list[QWidget] = []
         self._cal_sensor_widgets: list[QWidget] = []
@@ -282,6 +289,11 @@ class MainWindow(QMainWindow):
         pos_grid.setColumnStretch(1, 1)
         for index, channel in enumerate(positional_channels):
             card = ServoCard(channel, SERVO_CHANNELS[channel], continuous=False)
+            saved_angle = self.settings.value(
+                f"servo/{channel}/last_angle", DEFAULT_ANGLE, type=int
+            )
+            clamped_angle = max(MIN_ANGLE, min(MAX_ANGLE, saved_angle))
+            card.set_angle_silent(clamped_angle)
             card.changed.connect(self._servo_changed)
             card.changed.connect(self._sync_simple_slider)
             self.cards[channel] = card
@@ -305,6 +317,8 @@ class MainWindow(QMainWindow):
         for index, channel in enumerate(continuous_channels):
             card = ServoCard(channel, SERVO_CHANNELS[channel], continuous=True)
             card.changed.connect(self._servo_changed)
+            card.continuous_released.connect(self._on_card_continuous_released)
+            card.fsr_enabled_toggled.connect(self._on_fsr_enabled_toggled)
             self.cards[channel] = card
             cont_grid.addWidget(card, index // 2, index % 2)
         control_layout.addLayout(cont_grid)
@@ -431,10 +445,20 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self._wrap_scroll(calibration_page), "Calibration")
 
         footer = QLabel(
-            "115200 baud   |   Space / Esc: Stop fingers   |   G: Grip   |   R: Release   |   T: Tare FSRs   |   1–3: Recall pose"
+            "115200 baud   |   Space / Esc: Stop fingers   |   G: Grip   |   H: Hold & Arm   |   R: Release   |   T: Tare FSRs   |   1–3: Recall pose"
         )
         footer.setObjectName("Tick")
         content.addWidget(footer)
+
+        if not self.slip_detection_checkbox.isChecked():
+            self._update_slip_display(0, 7, False, False)
+        for ch in CONTINUOUS_SERVO_CHANNELS:
+            if not self._is_fsr_enabled(ch):
+                self._latest_fsr[ch] = (0, 0, 5)
+                if ch in self.simple_fsr_bars:
+                    self.simple_fsr_bars[ch].setProperty("fsrState", "5")
+                    self._repolish(self.simple_fsr_bars[ch])
+        self._refresh_fsr_target_limits()
 
     @staticmethod
     def _wrap_scroll(inner: QWidget) -> QScrollArea:
@@ -476,6 +500,7 @@ class MainWindow(QMainWindow):
             (Qt.Key.Key_Escape, self._stop_all_fingers, False),
             (Qt.Key.Key_Space, self._stop_all_fingers, True),
             (Qt.Key.Key_G, self._trigger_auto_grip, True),
+            (Qt.Key.Key_H, self._arm_hold_and_slip, True),
             (Qt.Key.Key_R, self._trigger_timed_release, True),
             (Qt.Key.Key_T, self._tare_fsrs, True),
             (Qt.Key.Key_1, lambda: self._apply_arm_pose(1), True),
@@ -556,6 +581,14 @@ class MainWindow(QMainWindow):
         auto_grip_btn.clicked.connect(self._trigger_auto_grip)
         actions.addWidget(auto_grip_btn, 2)
 
+        arm_hold_btn = QPushButton("Hold && Arm [H]")
+        arm_hold_btn.setObjectName("Quick")
+        arm_hold_btn.setToolTip(
+            "Stop manual motion and arm FSR Force Hold & Slip Detection on currently gripped object"
+        )
+        arm_hold_btn.clicked.connect(self._arm_hold_and_slip)
+        actions.addWidget(arm_hold_btn, 2)
+
         hold_open_btn = QPushButton("Hold Open All")
         hold_open_btn.setObjectName("HoldReverse")
         hold_open_btn.setToolTip("Hold to open all 3 fingers simultaneously; release to stop")
@@ -566,10 +599,10 @@ class MainWindow(QMainWindow):
         hold_close_btn = QPushButton("Hold Close All")
         hold_close_btn.setObjectName("HoldForward")
         hold_close_btn.setToolTip(
-            "Hold to close all 3 fingers simultaneously (FSR auto-stop stops each finger at its limit)"
+            "Hold to close all 3 fingers simultaneously; releasing auto-arms Force Hold / Slip Detection if FSRs touch"
         )
         hold_close_btn.pressed.connect(lambda: self._grip_hold_action("CLOSE_HOLD"))
-        hold_close_btn.released.connect(lambda: self._grip_hold_action("STOP"))
+        hold_close_btn.released.connect(lambda: self._grip_hold_action("RELEASE_HOLD"))
         actions.addWidget(hold_close_btn, 2)
 
         stop_btn = QPushButton("Stop Fingers")
@@ -653,14 +686,36 @@ class MainWindow(QMainWindow):
         self.opt_value_label.setWordWrap(True)
         opt_layout.addWidget(self.opt_value_label)
 
+        saved_force_hold_enabled = self.settings.value(
+            "loop/force_hold_enabled", True, type=bool
+        )
+        saved_slip_enabled = self.settings.value(
+            "loop/slip_detection_enabled",
+            self.settings.value("loop/closed_loop_hold", True, type=bool),
+            type=bool,
+        )
         adv_slip_head = QHBoxLayout()
         adv_slip_head.setSpacing(8)
         adv_slip_title = QLabel("Slip Fusion (Opt + LiDAR + FSR)")
         adv_slip_title.setObjectName("Kicker")
         adv_slip_head.addWidget(adv_slip_title)
+        self.adv_force_hold_checkbox = QCheckBox("FSR Force Hold")
+        self.adv_force_hold_checkbox.setToolTip(
+            "Automatically pulls fingers tighter in slow micro-pulses whenever an FSR drops below target"
+        )
+        self.adv_force_hold_checkbox.setChecked(saved_force_hold_enabled)
+        self.adv_force_hold_checkbox.toggled.connect(self._adv_force_hold_toggled)
+        adv_slip_head.addWidget(self.adv_force_hold_checkbox)
+        self.adv_slip_checkbox = QCheckBox("Slip Detection (Optical + LiDAR)")
+        self.adv_slip_checkbox.setToolTip(
+            "When enabled, grips softly to Contact Thr and lets calm Slip Detection hold the object"
+        )
+        self.adv_slip_checkbox.setChecked(saved_slip_enabled)
+        self.adv_slip_checkbox.toggled.connect(self._adv_slip_toggled)
+        adv_slip_head.addWidget(self.adv_slip_checkbox)
         adv_slip_head.addStretch(1)
-        self.adv_slip_badge = QLabel(SLIP_STATE_LABELS[0])
-        self.adv_slip_badge.setObjectName("SlipState0")
+        self.adv_slip_badge = QLabel(SLIP_STATE_LABELS[0 if saved_slip_enabled else 7])
+        self.adv_slip_badge.setObjectName("SlipState0" if saved_slip_enabled else "SlipState7")
         adv_slip_head.addWidget(self.adv_slip_badge)
         opt_layout.addLayout(adv_slip_head)
 
@@ -668,7 +723,7 @@ class MainWindow(QMainWindow):
         self.adv_slip_bar.setRange(0, 100)
         self.adv_slip_bar.setValue(0)
         self.adv_slip_bar.setTextVisible(False)
-        self.adv_slip_bar.setProperty("slipState", "0")
+        self.adv_slip_bar.setProperty("slipState", "0" if saved_slip_enabled else "7")
         opt_layout.addWidget(self.adv_slip_bar)
 
         self.adv_slip_label = QLabel("Evidence: 0% (Opt: still, LiDAR: still)")
@@ -871,6 +926,12 @@ class MainWindow(QMainWindow):
         )
         self.loop_grip_timeout_spin.valueChanged.connect(self._cal_grip_timeout_changed)
 
+        self.loop_slip_speed_spin = _make_spin(
+            "slip_speed_pct", DEFAULT_SLIP_TIGHTEN_SPEED_PCT,
+            MIN_SLIP_TIGHTEN_SPEED_PCT, MAX_SLIP_TIGHTEN_SPEED_PCT,
+            2, " %", "Calm tightening speed during Slip Detection (lower = slower, more controlled)",
+        )
+
         specs = (
             ("Auto-Grip Distance", self.loop_trigger_spin),
             ("Proximity Dwell", self.loop_dwell_spin),
@@ -879,6 +940,7 @@ class MainWindow(QMainWindow):
             ("Slip Force Boost", self.loop_boost_spin),
             ("Force Hold Deadband", self.loop_deadband_spin),
             ("Max Grip Time", self.loop_grip_timeout_spin),
+            ("Slip Tighten Speed", self.loop_slip_speed_spin),
         )
         for idx, (lbl_text, spin_box) in enumerate(specs):
             col = QVBoxLayout()
@@ -950,8 +1012,8 @@ class MainWindow(QMainWindow):
         smart_layout.addWidget(self.simple_ctrl_banner)
 
         toggles = QHBoxLayout()
-        toggles.setSpacing(20)
-        self.auto_lidar_checkbox = QCheckBox("Auto-Grip on Palm LiDAR Distance")
+        toggles.setSpacing(14)
+        self.auto_lidar_checkbox = QCheckBox("Auto-Grip on Palm LiDAR")
         self.auto_lidar_checkbox.setToolTip(
             "When armed, closes automatically after an object stays within trigger distance for dwell time"
         )
@@ -961,17 +1023,22 @@ class MainWindow(QMainWindow):
         self.auto_lidar_checkbox.toggled.connect(self._toggle_auto_modes)
         toggles.addWidget(self.auto_lidar_checkbox)
 
-        self.closed_loop_checkbox = QCheckBox(
-            "Closed-Loop Force Hold && Slip Control (FSR + Optical + LiDAR)"
+        self.force_hold_checkbox = QCheckBox("FSR Force Hold")
+        self.force_hold_checkbox.setToolTip(
+            "Automatically pulls fingers tighter in slow micro-pulses whenever an FSR drops below target"
         )
-        self.closed_loop_checkbox.setToolTip(
-            "Maintains grip force if FSR pressure drops and boosts force if Optical or LiDAR detects slip"
+        self.force_hold_checkbox.setChecked(self.adv_force_hold_checkbox.isChecked())
+        self.force_hold_checkbox.toggled.connect(self._simple_force_hold_toggled)
+        toggles.addWidget(self.force_hold_checkbox)
+
+        self.slip_detection_checkbox = QCheckBox("Slip Detection (Optical + LiDAR)")
+        self.slip_detection_checkbox.setToolTip(
+            "When enabled, grips softly to Contact Thr and lets calm Slip Detection hold the object"
         )
-        self.closed_loop_checkbox.setChecked(
-            self.settings.value("loop/closed_loop_hold", True, type=bool)
-        )
-        self.closed_loop_checkbox.toggled.connect(self._toggle_auto_modes)
-        toggles.addWidget(self.closed_loop_checkbox)
+        self.slip_detection_checkbox.setChecked(self.adv_slip_checkbox.isChecked())
+        self.slip_detection_checkbox.toggled.connect(self._simple_slip_toggled)
+        self.closed_loop_checkbox = self.slip_detection_checkbox
+        toggles.addWidget(self.slip_detection_checkbox)
         toggles.addStretch(1)
 
         timeout_lbl = QLabel("Max Grip Time")
@@ -995,37 +1062,60 @@ class MainWindow(QMainWindow):
         smart_layout.addLayout(toggles)
 
         btn_row = QHBoxLayout()
-        btn_row.setSpacing(10)
-        grip_btn = QPushButton("Grip Object [G]")
-        grip_btn.setObjectName("Primary")
-        grip_btn.setProperty("hero", True)
-        grip_btn.setFixedHeight(40)
+        btn_row.setSpacing(8)
+
+        def _make_hero_btn(
+            text: str, obj_name: str, stretch: int, tooltip: str | None = None
+        ) -> QPushButton:
+            btn = QPushButton(text)
+            btn.setObjectName(obj_name)
+            btn.setProperty("hero", True)
+            btn.setStyleSheet("padding: 8px 12px; min-height: 22px;")
+            btn.setFixedHeight(40)
+            if tooltip:
+                btn.setToolTip(tooltip)
+            btn_row.addWidget(btn, stretch)
+            return btn
+
+        grip_btn = _make_hero_btn("Grip Object [G]", "Primary", 2)
         grip_btn.clicked.connect(self._trigger_auto_grip)
-        btn_row.addWidget(grip_btn, 2)
 
-        release_btn = QPushButton("Release Object [R]")
-        release_btn.setObjectName("HoldReverse")
-        release_btn.setProperty("hero", True)
-        release_btn.setFixedHeight(40)
-        release_btn.setToolTip("Opens all 3 fingers for the configured release duration")
-        release_btn.clicked.connect(self._trigger_timed_release)
-        btn_row.addWidget(release_btn, 2)
+        arm_btn = _make_hero_btn(
+            "Hold && Arm [H]",
+            "Quick",
+            2,
+            "Stop manual motion and arm FSR Force Hold & Slip Detection on currently gripped object",
+        )
+        arm_btn.clicked.connect(self._arm_hold_and_slip)
 
-        hold_open_btn = QPushButton("Hold to Open")
-        hold_open_btn.setObjectName("HoldReverse")
-        hold_open_btn.setProperty("hero", True)
-        hold_open_btn.setFixedHeight(40)
-        hold_open_btn.setToolTip("Hold to manually open all 3 fingers; release to stop")
+        hold_close_btn = _make_hero_btn(
+            "Hold to Close",
+            "HoldForward",
+            1,
+            "Hold to manually close all 3 fingers; releasing auto-arms Force Hold / Slip Detection if FSRs touch",
+        )
+        hold_close_btn.pressed.connect(lambda: self._grip_hold_action("CLOSE_HOLD"))
+        hold_close_btn.released.connect(lambda: self._grip_hold_action("RELEASE_HOLD"))
+
+        hold_open_btn = _make_hero_btn(
+            "Hold to Open",
+            "HoldReverse",
+            1,
+            "Hold to manually open all 3 fingers; release to stop",
+        )
         hold_open_btn.pressed.connect(lambda: self._grip_hold_action("OPEN_HOLD"))
         hold_open_btn.released.connect(lambda: self._grip_hold_action("STOP"))
-        btn_row.addWidget(hold_open_btn, 1)
 
-        stop_btn = QPushButton("Stop Fingers [Space]")
-        stop_btn.setObjectName("StopButton")
-        stop_btn.setProperty("hero", True)
-        stop_btn.setFixedHeight(40)
+        release_btn = _make_hero_btn(
+            "Release [R]",
+            "HoldReverse",
+            1,
+            "Opens all 3 fingers for the configured release duration",
+        )
+        release_btn.clicked.connect(self._trigger_timed_release)
+
+        stop_btn = _make_hero_btn("Stop [Space]", "StopButton", 1)
         stop_btn.clicked.connect(self._stop_all_fingers)
-        btn_row.addWidget(stop_btn, 1)
         smart_layout.addLayout(btn_row)
         layout.addWidget(smart_panel)
 
@@ -1138,12 +1228,19 @@ class MainWindow(QMainWindow):
         for ch in continuous_channels:
             row = QHBoxLayout()
             row.setSpacing(8)
-            lbl = QLabel(SERVO_CHANNELS[ch])
-            lbl.setObjectName("Description")
-            lbl.setFixedWidth(62)
-            row.addWidget(lbl)
+            chk = QCheckBox(SERVO_CHANNELS[ch])
+            chk.setFixedWidth(84)
+            chk.setChecked(self._is_fsr_enabled(ch))
+            chk.setToolTip(
+                "Uncheck if this finger's FSR is disconnected or broken (follows active fingers)"
+            )
+            chk.toggled.connect(
+                lambda checked, channel=ch: self._on_fsr_enabled_toggled(channel, checked)
+            )
+            self.simple_fsr_checkboxes[ch] = chk
+            row.addWidget(chk)
             bar = QProgressBar()
-            grip_limit = self.fsr_grip_spins[ch].value() if ch in self.fsr_grip_spins else DEFAULT_FSR_GRIP_THRESHOLD
+            grip_limit = self._active_fsr_limit_for_channel(ch)
             bar.setRange(0, max(1, grip_limit))
             bar.setValue(0)
             bar.setTextVisible(False)
@@ -1465,6 +1562,15 @@ class MainWindow(QMainWindow):
         header.addWidget(title)
         header.addStretch(1)
 
+        enable_box = QCheckBox("FSR Enabled")
+        enable_box.setToolTip(
+            "Uncheck if this finger's FSR sensor is disconnected or broken (follows active fingers)"
+        )
+        enable_box.setChecked(
+            self.settings.value(f"fsr/{channel}/enabled", True, type=bool)
+        )
+        header.addWidget(enable_box)
+
         invert_box = QCheckBox("Invert Close (Reverse = Close)")
         invert_box.setToolTip(
             "Check this if Reverse (0°) rather than Forward (180°) tightens this finger's tendon."
@@ -1503,6 +1609,10 @@ class MainWindow(QMainWindow):
         self.fsr_grip_spins[channel] = boxes[1]
         self.fsr_max_spins[channel] = boxes[2]
         self.fsr_invert_boxes[channel] = invert_box
+        self.fsr_enable_boxes[channel] = enable_box
+        enable_box.toggled.connect(
+            lambda checked, ch=channel: self._on_fsr_enabled_toggled(ch, checked)
+        )
 
         apply_btn = QPushButton("Apply FSR Settings")
         apply_btn.setObjectName("Quick")
@@ -1518,7 +1628,10 @@ class MainWindow(QMainWindow):
         fsr_layout.addWidget(fsr_note)
 
         if channel in self.cards:
-            self.cards[channel].update_fsr(0, 0, 0, boxes[1].value())
+            self.cards[channel].set_fsr_enabled_silent(enable_box.isChecked())
+            self.cards[channel].update_fsr(
+                0, 0, 0 if enable_box.isChecked() else 5, boxes[1].value()
+            )
 
         return fsr_panel
 
@@ -1567,6 +1680,7 @@ class MainWindow(QMainWindow):
         self.arduino_ready = False
         self._last_error = ""
         self._reported_servo_count = None
+        self._synced_channels.clear()
         self._set_status("Waiting", "Connecting")
         self.connection_note.setText("Opening port and waiting for Arduino…")
         self.connect_button.setEnabled(False)
@@ -1612,20 +1726,22 @@ class MainWindow(QMainWindow):
                 self.motion_speed_spins[channel].value(),
                 self.motion_acceleration_spins[channel].value(),
             ))
-            target_angle = (
-                DEFAULT_ANGLE
-                if channel in CONTINUOUS_SERVO_CHANNELS
-                else self.cards[channel].angle()
-            )
-            self.cards[channel].set_angle(target_angle)
-            self.pending[channel] = target_angle
+            if channel in CONTINUOUS_SERVO_CHANNELS:
+                self.cards[channel].set_angle(DEFAULT_ANGLE)
+                self.pending[channel] = DEFAULT_ANGLE
+            elif channel not in self._synced_channels:
+                self.pending[channel] = self.cards[channel].angle()
         self.worker.send(set_fsr_guard(self.fsr_guard_checkbox.isChecked()))
+        self._latest_fsr = {
+            ch: (0, 0, 0 if self._is_fsr_enabled(ch) else 5)
+            for ch in CONTINUOUS_SERVO_CHANNELS
+        }
         for finger_index, channel in enumerate(CONTINUOUS_SERVO_CHANNELS):
-            contact, grip, max_thr, invert = self._fsr_values(channel)
+            contact, grip, max_thr, invert, enabled = self._fsr_values(channel)
             self.worker.send(
-                set_fsr_calibration(finger_index, contact, grip, max_thr, invert)
+                set_fsr_calibration(finger_index, contact, grip, max_thr, invert, enabled)
             )
-            self.cards[channel].update_fsr(0, 0, 0, grip)
+        self._refresh_fsr_target_limits()
         self.worker.send(
             set_optical_calibration(
                 self.opt_motion_spin.value(), self.opt_squal_spin.value()
@@ -1641,12 +1757,14 @@ class MainWindow(QMainWindow):
                 self.loop_boost_spin.value(),
                 self.loop_deadband_spin.value(),
                 int(round(self.loop_grip_timeout_spin.value() * 1000)),
+                self.loop_slip_speed_spin.value(),
             )
         )
         self.worker.send(
             set_auto_modes(
                 self.auto_lidar_checkbox.isChecked(),
-                self.closed_loop_checkbox.isChecked(),
+                self.slip_detection_checkbox.isChecked(),
+                self.force_hold_checkbox.isChecked(),
             )
         )
         self._flush_pending()
@@ -1743,16 +1861,42 @@ class MainWindow(QMainWindow):
         boxes = self.cal_inputs[channel]
         return boxes[0].value(), boxes[1].value(), boxes[2].value()
 
-    def _fsr_values(self, channel: int) -> tuple[int, int, int, bool]:
+    def _is_fsr_enabled(self, channel: int) -> bool:
+        if channel in self.fsr_enable_boxes:
+            return self.fsr_enable_boxes[channel].isChecked()
+        return self.settings.value(f"fsr/{channel}/enabled", True, type=bool)
+
+    def _on_fsr_enabled_toggled(self, channel: int, enabled: bool) -> None:
+        if channel in self.simple_fsr_checkboxes:
+            chk = self.simple_fsr_checkboxes[channel]
+            chk.blockSignals(True)
+            chk.setChecked(enabled)
+            chk.blockSignals(False)
+        if channel in self.fsr_enable_boxes:
+            box = self.fsr_enable_boxes[channel]
+            box.blockSignals(True)
+            box.setChecked(enabled)
+            box.blockSignals(False)
+        if channel in self.cards:
+            self.cards[channel].set_fsr_enabled_silent(enabled)
+        self._latest_fsr[channel] = (0, 0, 0 if enabled else 5)
+        if channel in self.simple_fsr_bars:
+            bar = self.simple_fsr_bars[channel]
+            bar.setProperty("fsrState", "0" if enabled else "5")
+            self._repolish(bar)
+        self._apply_fsr_calibration(channel)
+
+    def _fsr_values(self, channel: int) -> tuple[int, int, int, bool, bool]:
         return (
             self.fsr_contact_spins[channel].value(),
             self.fsr_grip_spins[channel].value(),
             self.fsr_max_spins[channel].value(),
             self.fsr_invert_boxes[channel].isChecked(),
+            self._is_fsr_enabled(channel),
         )
 
     def _apply_fsr_calibration(self, channel: int) -> None:
-        contact, grip, max_thr, invert = self._fsr_values(channel)
+        contact, grip, max_thr, invert, enabled = self._fsr_values(channel)
         if not (MIN_FSR_THRESHOLD <= contact < grip < max_thr <= MAX_FSR_THRESHOLD):
             self.fsr_cal_notes[channel].setText(
                 f"ERROR: Must satisfy {MIN_FSR_THRESHOLD} <= CONTACT < GRIP STOP < MAX <= {MAX_FSR_THRESHOLD}."
@@ -1762,23 +1906,66 @@ class MainWindow(QMainWindow):
         self.settings.setValue(f"fsr/{channel}/grip", grip)
         self.settings.setValue(f"fsr/{channel}/max", max_thr)
         self.settings.setValue(f"fsr/{channel}/invert_close", invert)
+        self.settings.setValue(f"fsr/{channel}/enabled", enabled)
         self.settings.sync()
         if self.settings.status() != QSettings.Status.NoError:
             self.fsr_cal_notes[channel].setText("COULD NOT SAVE FSR SETTINGS.")
             return
-        if channel in self.cards:
-            self.cards[channel].update_fsr(0, 0, 0, grip)
+        self._refresh_fsr_target_limits()
         finger_index = CONTINUOUS_SERVO_CHANNELS.index(channel)
+        suffix = (
+            (" (Inverted close)" if invert else "")
+            + ("" if enabled else " (FSR OFF — follow mode)")
+        )
         if self.arduino_ready and self.worker:
-            self.worker.send(set_fsr_calibration(finger_index, contact, grip, max_thr, invert))
+            self.worker.send(
+                set_fsr_calibration(finger_index, contact, grip, max_thr, invert, enabled)
+            )
             self.fsr_cal_notes[channel].setText(
-                f"ACTIVE: Contact {contact} / Stop {grip} / Max {max_thr}"
-                + (" (Inverted close)" if invert else "")
+                f"ACTIVE: Contact {contact} / Stop {grip} / Max {max_thr}{suffix}"
             )
         else:
             self.fsr_cal_notes[channel].setText(
-                f"SAVED: Contact {contact} / Stop {grip} / Max {max_thr}. Sent on next connect."
+                f"SAVED: Contact {contact} / Stop {grip} / Max {max_thr}{suffix}. Sent on next connect."
             )
+
+    def _active_fsr_limit_for_channel(self, channel: int) -> int:
+        if self.slip_detection_checkbox.isChecked():
+            return (
+                self.fsr_contact_spins[channel].value()
+                if channel in self.fsr_contact_spins
+                else DEFAULT_FSR_CONTACT_THRESHOLD
+            )
+        return (
+            self.fsr_grip_spins[channel].value()
+            if channel in self.fsr_grip_spins
+            else DEFAULT_FSR_GRIP_THRESHOLD
+        )
+
+    def _refresh_fsr_target_limits(self) -> None:
+        for ch in CONTINUOUS_SERVO_CHANNELS:
+            max_thr = (
+                self.fsr_max_spins[ch].value()
+                if ch in self.fsr_max_spins
+                else DEFAULT_FSR_MAX_THRESHOLD
+            )
+            active_limit = min(
+                max_thr, self._active_fsr_limit_for_channel(ch) + self._slip_force_boost
+            )
+            net, raw, state = self._latest_fsr.get(ch, (0, 0, 0))
+            disabled = not self._is_fsr_enabled(ch) or state == 5
+            eff_state = 5 if disabled else state
+            if ch in self.cards:
+                self.cards[ch].update_fsr(net, raw, eff_state, active_limit)
+            if ch in self.simple_fsr_bars and ch in self.simple_fsr_labels:
+                bar = self.simple_fsr_bars[ch]
+                bar.setRange(0, max(1, active_limit))
+                if disabled:
+                    bar.setValue(0)
+                    self.simple_fsr_labels[ch].setText("FSR OFF")
+                else:
+                    bar.setValue(max(0, min(net, active_limit)))
+                    self.simple_fsr_labels[ch].setText(f"{net} / {active_limit}")
 
     def _trigger_auto_grip(self) -> None:
         if not self.arduino_ready or not self.worker:
@@ -1789,10 +1976,34 @@ class MainWindow(QMainWindow):
         for ch in CONTINUOUS_SERVO_CHANNELS:
             self.pending.pop(ch, None)
         self.worker.send(grip_command("START"))
-        self.grip_master_status.setText(
-            "AUTO-GRIP ACTIVE: Closing all 3 fingers until each FSR reaches its stop limit …"
-        )
+        if self.slip_detection_checkbox.isChecked():
+            self.grip_master_status.setText(
+                "AUTO-GRIP ACTIVE: Closing fingers softly to Contact Thr, then arming calm hold …"
+            )
+        elif self.force_hold_checkbox.isChecked():
+            self.grip_master_status.setText(
+                "AUTO-GRIP ACTIVE: Closing fingers to Grip Stop Thr, then arming FSR Force Hold …"
+            )
+        else:
+            self.grip_master_status.setText(
+                "AUTO-GRIP ACTIVE: Closing fingers to Grip Stop Thr (Force Hold & Slip OFF) …"
+            )
         self._set_ctrl_banner(2, self._slip_force_boost)
+
+    def _arm_hold_and_slip(self) -> None:
+        if not self.arduino_ready or not self.worker:
+            self.grip_master_status.setText(
+                "CONNECT THE ARDUINO BEFORE ARMING FORCE HOLD & SLIP."
+            )
+            self._set_ctrl_banner(0, 0, "CONNECT ARDUINO FIRST")
+            return
+        self._grip_sync_active = True
+        for ch in CONTINUOUS_SERVO_CHANNELS:
+            self.pending.pop(ch, None)
+        self.worker.send(grip_command("ARM"))
+        self.grip_master_status.setText(
+            "ARMING HOLD ON CURRENT GRIP: Checking FSR contact to engage Force Hold / Slip Detection …"
+        )
 
     def _trigger_timed_release(self) -> None:
         if not self.arduino_ready or not self.worker:
@@ -1808,14 +2019,62 @@ class MainWindow(QMainWindow):
         )
         self._set_ctrl_banner(4, 0)
 
+    def _simple_force_hold_toggled(self, enabled: bool) -> None:
+        self.adv_force_hold_checkbox.blockSignals(True)
+        self.adv_force_hold_checkbox.setChecked(enabled)
+        self.adv_force_hold_checkbox.blockSignals(False)
+        self._apply_force_hold_toggle(enabled)
+
+    def _adv_force_hold_toggled(self, enabled: bool) -> None:
+        self.force_hold_checkbox.blockSignals(True)
+        self.force_hold_checkbox.setChecked(enabled)
+        self.force_hold_checkbox.blockSignals(False)
+        self._apply_force_hold_toggle(enabled)
+
+    def _apply_force_hold_toggle(self, enabled: bool) -> None:
+        if not enabled and not self.slip_detection_checkbox.isChecked() and self._ctrl_state == 3:
+            self._set_ctrl_banner(0, 0)
+        self._toggle_auto_modes()
+
+    def _simple_slip_toggled(self, enabled: bool) -> None:
+        self.adv_slip_checkbox.blockSignals(True)
+        self.adv_slip_checkbox.setChecked(enabled)
+        self.adv_slip_checkbox.blockSignals(False)
+        self._apply_slip_toggle(enabled)
+
+    def _adv_slip_toggled(self, enabled: bool) -> None:
+        self.slip_detection_checkbox.blockSignals(True)
+        self.slip_detection_checkbox.setChecked(enabled)
+        self.slip_detection_checkbox.blockSignals(False)
+        self._apply_slip_toggle(enabled)
+
+    def _apply_slip_toggle(self, enabled: bool) -> None:
+        if not enabled:
+            self._slip_force_boost = 0
+            self._update_slip_display(0, 7, False, False)
+            if self._ctrl_state == 3:
+                if self.force_hold_checkbox.isChecked():
+                    self._set_ctrl_banner(3, 0)
+                else:
+                    self._set_ctrl_banner(0, 0)
+        elif not self.arduino_ready:
+            self._update_slip_display(0, 0, False, False)
+        else:
+            self._update_slip_display(0, 8, False, False)
+        self._refresh_fsr_target_limits()
+        self._toggle_auto_modes()
+
     def _toggle_auto_modes(self) -> None:
         auto_lidar = self.auto_lidar_checkbox.isChecked()
-        closed_loop = self.closed_loop_checkbox.isChecked()
+        slip_enabled = self.slip_detection_checkbox.isChecked()
+        force_hold = self.force_hold_checkbox.isChecked()
         self.settings.setValue("loop/auto_lidar", auto_lidar)
-        self.settings.setValue("loop/closed_loop_hold", closed_loop)
+        self.settings.setValue("loop/slip_detection_enabled", slip_enabled)
+        self.settings.setValue("loop/closed_loop_hold", slip_enabled)
+        self.settings.setValue("loop/force_hold_enabled", force_hold)
         self.settings.sync()
         if self.arduino_ready and self.worker:
-            self.worker.send(set_auto_modes(auto_lidar, closed_loop))
+            self.worker.send(set_auto_modes(auto_lidar, slip_enabled, force_hold))
 
     def _cal_grip_timeout_changed(self, seconds: float) -> None:
         self.simple_grip_timeout_spin.blockSignals(True)
@@ -1836,6 +2095,7 @@ class MainWindow(QMainWindow):
         self.loop_boost_spin.setValue(DEFAULT_SLIP_BOOST_STEP)
         self.loop_deadband_spin.setValue(DEFAULT_FORCE_HOLD_DEADBAND)
         self.loop_grip_timeout_spin.setValue(DEFAULT_GRIP_TIMEOUT_MS / 1000.0)
+        self.loop_slip_speed_spin.setValue(DEFAULT_SLIP_TIGHTEN_SPEED_PCT)
         self.lidar_cal_note.setText(
             "LOOP DEFAULTS LOADED. CLICK SAVE / APPLY LOOP TO PERSIST."
         )
@@ -1848,6 +2108,7 @@ class MainWindow(QMainWindow):
         boost = self.loop_boost_spin.value()
         deadband = self.loop_deadband_spin.value()
         grip_timeout_ms = int(round(self.loop_grip_timeout_spin.value() * 1000))
+        slip_speed = self.loop_slip_speed_spin.value()
         for key, val in (
             ("trigger_mm", trig),
             ("dwell_ms", dwell),
@@ -1856,6 +2117,7 @@ class MainWindow(QMainWindow):
             ("boost_step", boost),
             ("hold_deadband", deadband),
             ("grip_timeout_ms", grip_timeout_ms),
+            ("slip_speed_pct", slip_speed),
         ):
             self.settings.setValue(f"loop/{key}", val)
         self.settings.sync()
@@ -1865,18 +2127,18 @@ class MainWindow(QMainWindow):
         if self.arduino_ready and self.worker:
             self.worker.send(
                 set_lidar_and_loop_config(
-                    trig, dwell, slip_vel, rel_ms, boost, deadband, grip_timeout_ms
+                    trig, dwell, slip_vel, rel_ms, boost, deadband, grip_timeout_ms, slip_speed
                 )
             )
             self.lidar_cal_note.setText(
                 f"ACTIVE: Trigger ≤ {trig} mm ({dwell} ms), Slip ≥ {slip_vel} mm/s, "
                 f"Release {rel_ms} ms, Boost +{boost}, Deadband {deadband}, "
-                f"Timeout {grip_timeout_ms / 1000.0:.1f} s."
+                f"Timeout {grip_timeout_ms / 1000.0:.1f} s, Slip Speed {slip_speed}%."
             )
         else:
             self.lidar_cal_note.setText(
                 f"SAVED: Trigger ≤ {trig} mm ({dwell} ms), Slip ≥ {slip_vel} mm/s, "
-                f"Timeout {grip_timeout_ms / 1000.0:.1f} s. Sent on connect."
+                f"Timeout {grip_timeout_ms / 1000.0:.1f} s, Slip Speed {slip_speed}%. Sent on connect."
             )
 
     def _sync_simple_slider(self, channel: int, angle: int) -> None:
@@ -1930,13 +2192,13 @@ class MainWindow(QMainWindow):
 
     def _grip_hold_action(self, action: str) -> None:
         if not self.arduino_ready or not self.worker:
-            if action != "STOP":
+            if action in ("CLOSE_HOLD", "OPEN_HOLD"):
                 self.grip_master_status.setText("CONNECT THE ARDUINO BEFORE DRIVING FINGERS.")
             return
         self._grip_sync_active = action != "STOP"
         for ch in CONTINUOUS_SERVO_CHANNELS:
             self.pending.pop(ch, None)
-            if action == "STOP":
+            if action in ("STOP", "RELEASE_HOLD"):
                 self.cards[ch].sync_continuous_state(DEFAULT_ANGLE)
         self.worker.send(grip_command(action))
         if action == "CLOSE_HOLD":
@@ -1945,8 +2207,32 @@ class MainWindow(QMainWindow):
             )
         elif action == "OPEN_HOLD":
             self.grip_master_status.setText("HOLDING OPEN ALL 3 FINGERS.")
+        elif action == "RELEASE_HOLD":
+            if self.force_hold_checkbox.isChecked() or self.slip_detection_checkbox.isChecked():
+                self.grip_master_status.setText(
+                    "MANUAL CLOSE RELEASED: Checking FSR contact to engage Force Hold / Slip Detection …"
+                )
+            else:
+                self.grip_master_status.setText("ALL 3 FINGERS STOPPED.")
         else:
             self.grip_master_status.setText("ALL 3 FINGERS STOPPED.")
+
+    def _on_card_continuous_released(self, channel: int, previous_angle: int) -> None:
+        inverted = (
+            channel in self.fsr_invert_boxes
+            and self.fsr_invert_boxes[channel].isChecked()
+        )
+        closing = (
+            previous_angle < DEFAULT_ANGLE
+            if inverted
+            else previous_angle > DEFAULT_ANGLE
+        )
+        if closing and (
+            self.force_hold_checkbox.isChecked()
+            or self.slip_detection_checkbox.isChecked()
+        ):
+            self.pending.pop(channel, None)
+            self._grip_hold_action("RELEASE_HOLD")
 
     def _stop_all_fingers(self) -> None:
         self._grip_sync_active = False
@@ -2174,6 +2460,8 @@ class MainWindow(QMainWindow):
 
     def _servo_changed(self, channel: int, angle: int) -> None:
         self.pending[channel] = angle
+        if channel not in CONTINUOUS_SERVO_CHANNELS:
+            self.settings.setValue(f"servo/{channel}/last_angle", angle)
 
     def _flush_pending(self) -> None:
         if not self.arduino_ready or not self.worker:
@@ -2203,6 +2491,18 @@ class MainWindow(QMainWindow):
                     self._grip_sync_active or angle == DEFAULT_ANGLE
                 ):
                     self.cards[channel].sync_continuous_state(angle)
+        elif kind == "SYNC" and len(values) == 2:
+            try:
+                channel, angle = map(int, values)
+            except ValueError:
+                return
+            if channel in self.cards and channel not in CONTINUOUS_SERVO_CHANNELS:
+                self._synced_channels.add(channel)
+                self.pending.pop(channel, None)
+                self.cards[channel].set_angle_silent(angle)
+                self.cards[channel].set_ack(angle)
+                self._sync_simple_slider(channel, angle)
+                self.settings.setValue(f"servo/{channel}/last_angle", angle)
         elif kind == "FSR" and len(values) == 9:
             try:
                 parsed = [int(v) for v in values]
@@ -2210,39 +2510,55 @@ class MainWindow(QMainWindow):
                 return
             nets, raws, states = parsed[:3], parsed[3:6], parsed[6:9]
             for finger_index, ch in enumerate(CONTINUOUS_SERVO_CHANNELS):
-                base_grip = self.fsr_grip_spins[ch].value() if ch in self.fsr_grip_spins else DEFAULT_FSR_GRIP_THRESHOLD
+                self._latest_fsr[ch] = (
+                    nets[finger_index], raws[finger_index], states[finger_index]
+                )
                 max_thr = self.fsr_max_spins[ch].value() if ch in self.fsr_max_spins else DEFAULT_FSR_MAX_THRESHOLD
-                active_limit = min(max_thr, base_grip + self._slip_force_boost)
+                active_limit = min(
+                    max_thr,
+                    self._active_fsr_limit_for_channel(ch) + self._slip_force_boost,
+                )
+                f_state = states[finger_index] if states[finger_index] in FSR_STATE_LABELS else 0
+                disabled = (f_state == 5) or (not self._is_fsr_enabled(ch))
+                eff_state = 5 if disabled else f_state
                 if ch in self.cards:
                     self.cards[ch].update_fsr(
-                        nets[finger_index], raws[finger_index], states[finger_index], active_limit
+                        nets[finger_index], raws[finger_index], eff_state, active_limit
                     )
                 if ch in self.simple_fsr_bars and ch in self.simple_fsr_labels:
                     bar = self.simple_fsr_bars[ch]
                     bar.setRange(0, max(1, active_limit))
-                    bar.setValue(max(0, min(nets[finger_index], active_limit)))
-                    f_state = states[finger_index] if states[finger_index] in FSR_STATE_LABELS else 0
-                    if bar.property("fsrState") != str(f_state):
-                        bar.setProperty("fsrState", str(f_state))
+                    bar.setValue(0 if disabled else max(0, min(nets[finger_index], active_limit)))
+                    if bar.property("fsrState") != str(eff_state):
+                        bar.setProperty("fsrState", str(eff_state))
                         self._repolish(bar)
-                    self.simple_fsr_labels[ch].setText(f"{nets[finger_index]} / {active_limit}")
+                    self.simple_fsr_labels[ch].setText(
+                        "FSR OFF" if disabled else f"{nets[finger_index]} / {active_limit}"
+                    )
                 if ch in self.fsr_cal_notes:
                     pin = FSR_PINS.get(ch, "FSR")
-                    label = FSR_STATE_LABELS.get(states[finger_index], "UNKNOWN")
-                    self.fsr_cal_notes[ch].setText(
-                        f"Live {pin}: Net {nets[finger_index]} · Raw {raws[finger_index]} · {label}"
-                    )
-        elif kind == "ACKFSRCAL" and len(values) == 5:
+                    label = FSR_STATE_LABELS.get(eff_state, "UNKNOWN")
+                    if disabled:
+                        self.fsr_cal_notes[ch].setText(f"Live {pin}: {label}")
+                    else:
+                        self.fsr_cal_notes[ch].setText(
+                            f"Live {pin}: Net {nets[finger_index]} · Raw {raws[finger_index]} · {label}"
+                        )
+        elif kind == "ACKFSRCAL" and len(values) in (5, 6):
             try:
-                finger, contact, grip, max_thr, invert = map(int, values)
+                finger, contact, grip, max_thr, invert = map(int, values[:5])
+                fsr_on = int(values[5]) == 1 if len(values) == 6 else True
             except ValueError:
                 return
             if 0 <= finger < len(CONTINUOUS_SERVO_CHANNELS):
                 ch = CONTINUOUS_SERVO_CHANNELS[finger]
                 if ch in self.fsr_cal_notes:
+                    suffix = (
+                        (" (Inverted close)" if invert else "")
+                        + ("" if fsr_on else " (FSR OFF — follow)")
+                    )
                     self.fsr_cal_notes[ch].setText(
-                        f"ARDUINO CONFIRMED FSR: Contact {contact} / Stop {grip} / Max {max_thr}"
-                        + (" (Inverted close)" if invert else "")
+                        f"ARDUINO CONFIRMED FSR: Contact {contact} / Stop {grip} / Max {max_thr}{suffix}"
                     )
         elif kind == "ACKFSRGUARD" and len(values) == 1:
             enabled = values[0] == "1"
@@ -2257,17 +2573,59 @@ class MainWindow(QMainWindow):
             )
         elif kind == "GRIPSTATE" and len(values) == 1:
             state = values[0]
+            slip_on = self.slip_detection_checkbox.isChecked()
+            force_on = self.force_hold_checkbox.isChecked()
             if state == "DONE":
                 self._grip_sync_active = False
                 self._set_ctrl_banner(0, 0)
-                self.grip_master_status.setText(
-                    "AUTO-GRIP COMPLETE: All 3 fingers stopped at their FSR grip limits."
-                )
+                if slip_on or force_on:
+                    self.grip_master_status.setText(
+                        "GRIP COMPLETE (Closed-loop hold stopped)."
+                    )
+                else:
+                    self.grip_master_status.setText(
+                        "AUTO-GRIP COMPLETE: Reached Grip Stop Thr (Force Hold & Slip OFF)."
+                    )
             elif state == "HOLDING":
                 self._grip_sync_active = True
                 self._set_ctrl_banner(3, self._slip_force_boost)
+                if slip_on and force_on:
+                    self.grip_master_status.setText(
+                        "FSR CONTACT LOCKED — FORCE HOLD + SLIP DETECTION ARMED: "
+                        "Maintaining grip force and reacting to Optical + LiDAR slip."
+                    )
+                elif force_on:
+                    self.grip_master_status.setText(
+                        "FSR CONTACT LOCKED — FSR FORCE HOLD ARMED (Slip Detection OFF): "
+                        "Maintaining target grip force via micro-pulses."
+                    )
+                elif slip_on:
+                    self.grip_master_status.setText(
+                        "FSR CONTACT LOCKED — SLIP DETECTION ARMED (Force Hold OFF): "
+                        "Calm tightening on Optical + LiDAR slip."
+                    )
+                else:
+                    self.grip_master_status.setText(
+                        "FSR CONTACT LOCKED — FORCE HOLD ARMED: "
+                        "Maintaining target grip force via micro-pulses."
+                    )
+            elif state == "NO_CONTACT":
+                self._grip_sync_active = False
+                self._set_ctrl_banner(0, 0, "NO FSR CONTACT")
+                for ch in CONTINUOUS_SERVO_CHANNELS:
+                    if ch in self.cards:
+                        self.cards[ch].sync_continuous_state(DEFAULT_ANGLE)
                 self.grip_master_status.setText(
-                    "CLOSED-LOOP HOLDING: Maintaining FSR force and monitoring Optical + LiDAR slip."
+                    "NO FSR CONTACT: At least one enabled FSR needs object contact before arming hold."
+                )
+            elif state == "STALL":
+                self._grip_sync_active = False
+                self._set_ctrl_banner(0, 0, "SAFETY STALL STOP")
+                for ch in CONTINUOUS_SERVO_CHANNELS:
+                    if ch in self.cards:
+                        self.cards[ch].sync_continuous_state(DEFAULT_ANGLE)
+                self.grip_master_status.setText(
+                    "SAFETY STALL STOP: Finger motors stopped safely due to missing FSR progress or tendon stroke limit."
                 )
             elif state == "DWELL":
                 self._set_ctrl_banner(1, 0)
@@ -2304,9 +2662,18 @@ class MainWindow(QMainWindow):
                 self.grip_master_status.setText("ALL 3 FINGERS STOPPED.")
             elif state == "CLOSING":
                 self._set_ctrl_banner(2, self._slip_force_boost)
-                self.grip_master_status.setText(
-                    "AUTO-GRIP CLOSING: Slowing on contact, stopping at FSR grip limits …"
-                )
+                if slip_on:
+                    self.grip_master_status.setText(
+                        "AUTO-GRIP CLOSING: Reaching Contact Thr softly before arming hold …"
+                    )
+                elif force_on:
+                    self.grip_master_status.setText(
+                        "AUTO-GRIP CLOSING: Micro-pulsing to Grip Stop Thr before arming FSR Force Hold …"
+                    )
+                else:
+                    self.grip_master_status.setText(
+                        "AUTO-GRIP CLOSING: Slowing on contact, stopping at Grip Stop Thr …"
+                    )
             elif state == "CLOSE_HOLD":
                 self.grip_master_status.setText("CLOSING ALL 3 FINGERS (FSR guard active) …")
             elif state == "OPEN_HOLD":
@@ -2337,28 +2704,48 @@ class MainWindow(QMainWindow):
             self.grip_master_status.setText(
                 f"SLIP DETECTED ({source}): Force target boosted +{boost} ADC."
             )
-        elif kind == "ACKLOOPCAL" and len(values) in (6, 7):
+        elif kind == "ACKLOOPCAL" and len(values) in (6, 7, 8):
             try:
                 trig, dwell, vel, rel_ms, boost, deadband = map(int, values[:6])
                 timeout_ms = (
                     int(values[6])
-                    if len(values) == 7
+                    if len(values) >= 7
                     else int(round(self.loop_grip_timeout_spin.value() * 1000))
+                )
+                slip_speed = (
+                    int(values[7])
+                    if len(values) == 8
+                    else self.loop_slip_speed_spin.value()
                 )
             except ValueError:
                 return
             self.lidar_cal_note.setText(
                 f"ARDUINO CONFIRMED LOOP: Trigger ≤ {trig} mm ({dwell} ms), Slip ≥ {vel} mm/s, "
                 f"Release {rel_ms} ms, Boost +{boost}, Deadband {deadband}, "
-                f"Timeout {timeout_ms / 1000.0:.1f} s."
+                f"Timeout {timeout_ms / 1000.0:.1f} s, Slip Speed {slip_speed}%."
             )
-        elif kind == "ACKAUTOMODE" and len(values) == 2:
+        elif kind == "ACKAUTOMODE" and len(values) in (2, 3):
             auto_lidar = values[0] == "1"
-            closed_loop = values[1] == "1"
+            slip_on = values[1] == "1"
+            force_hold_on = values[2] == "1" if len(values) == 3 else slip_on
             self.lidar_cal_note.setText(
                 f"ARDUINO CONFIRMED MODES: Auto-LiDAR {'ON' if auto_lidar else 'OFF'}, "
-                f"Closed-Loop Hold {'ON' if closed_loop else 'OFF'}."
+                f"Force Hold {'ON' if force_hold_on else 'OFF'}, "
+                f"Slip Detection {'ON' if slip_on else 'OFF'}."
             )
+        elif kind == "STALL" and len(values) == 2:
+            try:
+                finger, net = map(int, values)
+            except ValueError:
+                return
+            if 0 <= finger < len(CONTINUOUS_SERVO_CHANNELS):
+                ch = CONTINUOUS_SERVO_CHANNELS[finger]
+                if ch in self.cards:
+                    self.cards[ch].sync_continuous_state(DEFAULT_ANGLE)
+                self.grip_master_status.setText(
+                    f"SAFETY STALL STOP: {SERVO_CHANNELS[ch]} stopped "
+                    f"(no FSR progress / stroke limit, pressure: {net})."
+                )
         elif kind == "GRIPSTOP" and len(values) == 2:
             try:
                 finger, net = map(int, values)
@@ -2432,24 +2819,31 @@ class MainWindow(QMainWindow):
     def _worker_finished(self) -> None:
         self.arduino_ready = False
         self._grip_sync_active = False
+        self._synced_channels.clear()
         self.pending.clear()
         for card in self.cards.values():
             card.reset_continuous_state()
             card.set_offline()
         for ch, note in self.fsr_cal_notes.items():
             note.setText(f"Live {FSR_PINS.get(ch, 'FSR')}: waiting for Arduino connection …")
+        self._latest_fsr = {
+            ch: (0, 0, 0 if self._is_fsr_enabled(ch) else 5)
+            for ch in CONTINUOUS_SERVO_CHANNELS
+        }
+        self._slip_force_boost = 0
         self._update_optical_display(0, 0, 0, 0, 0, 3)
         self._update_lidar_and_loop_display(0, 0, 3, 0, 0)
-        self._update_slip_display(0, 0, False, False)
+        self._update_slip_display(
+            0, 0 if self.slip_detection_checkbox.isChecked() else 7, False, False
+        )
         self.simple_lidar_plot.clear()
         for ch in CONTINUOUS_SERVO_CHANNELS:
-            if ch in self.simple_fsr_bars and ch in self.simple_fsr_labels:
-                grip_limit = self.fsr_grip_spins[ch].value() if ch in self.fsr_grip_spins else DEFAULT_FSR_GRIP_THRESHOLD
-                self.simple_fsr_bars[ch].setRange(0, max(1, grip_limit))
-                self.simple_fsr_bars[ch].setValue(0)
-                self.simple_fsr_bars[ch].setProperty("fsrState", "0")
+            if ch in self.simple_fsr_bars:
+                self.simple_fsr_bars[ch].setProperty(
+                    "fsrState", "0" if self._is_fsr_enabled(ch) else "5"
+                )
                 self._repolish(self.simple_fsr_bars[ch])
-                self.simple_fsr_labels[ch].setText(f"0 / {grip_limit}")
+        self._refresh_fsr_target_limits()
         self.opt_cal_note.setText(
             f"SPI pins: {OPTICAL_SPI_PINS}. Connect Arduino and move a surface 15–35 mm below the lens to tune."
         )
@@ -2509,6 +2903,7 @@ class MainWindow(QMainWindow):
         widget.style().polish(widget)
 
     def closeEvent(self, event) -> None:
+        self.settings.sync()
         if self.worker is not None:
             self.worker.stop(self._continuous_stop_commands())
             self.worker.wait(2000)

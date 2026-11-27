@@ -2,8 +2,8 @@
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QProgressBar, QPushButton, QSlider,
-    QSpinBox, QVBoxLayout,
+    QCheckBox, QFrame, QHBoxLayout, QLabel, QProgressBar, QPushButton,
+    QSlider, QSpinBox, QVBoxLayout,
 )
 
 from .config import (
@@ -14,6 +14,8 @@ from .config import (
 
 class ServoCard(QFrame):
     changed = Signal(int, int)  # channel, target angle
+    continuous_released = Signal(int, int)  # channel, previous angle
+    fsr_enabled_toggled = Signal(int, bool)  # channel, enabled
 
     def __init__(self, channel: int, name: str, continuous: bool = False, parent=None):
         super().__init__(parent)
@@ -69,6 +71,7 @@ class ServoCard(QFrame):
         self.fsr_bar = None
         self.fsr_state_badge = None
         self.fsr_value_label = None
+        self.fsr_enable_checkbox = None
 
         if continuous:
             instruction = QLabel("Hold to drive")
@@ -112,6 +115,15 @@ class ServoCard(QFrame):
             fsr_title = QLabel(f"FSR Force ({pin_name})")
             fsr_title.setObjectName("Kicker")
             fsr_header.addWidget(fsr_title)
+            self.fsr_enable_checkbox = QCheckBox("FSR Enabled")
+            self.fsr_enable_checkbox.setChecked(True)
+            self.fsr_enable_checkbox.setToolTip(
+                "Uncheck if this finger's FSR is disconnected or broken (follows active fingers)"
+            )
+            self.fsr_enable_checkbox.toggled.connect(
+                lambda checked: self.fsr_enabled_toggled.emit(self.channel, checked)
+            )
+            fsr_header.addWidget(self.fsr_enable_checkbox)
             fsr_header.addStretch()
             self.fsr_state_badge = QLabel(FSR_STATE_LABELS[0])
             self.fsr_state_badge.setObjectName("FsrState0")
@@ -216,6 +228,24 @@ class ServoCard(QFrame):
         else:
             self.slider.setValue(value)
 
+    def set_angle_silent(self, value: int) -> None:
+        value = max(MIN_ANGLE, min(MAX_ANGLE, int(value)))
+        self._command = value
+        if not self.continuous and self.slider and self.spinbox:
+            self.slider.blockSignals(True)
+            self.spinbox.blockSignals(True)
+            self.slider.setValue(value)
+            self.spinbox.setValue(value)
+            self.slider.blockSignals(False)
+            self.spinbox.blockSignals(False)
+            self.value_text.setText(f"{value}°")
+
+    def set_fsr_enabled_silent(self, enabled: bool) -> None:
+        if self.fsr_enable_checkbox is not None:
+            self.fsr_enable_checkbox.blockSignals(True)
+            self.fsr_enable_checkbox.setChecked(enabled)
+            self.fsr_enable_checkbox.blockSignals(False)
+
     def angle(self) -> int:
         return self._command if self.continuous else self.slider.value()
 
@@ -246,11 +276,17 @@ class ServoCard(QFrame):
         safe_limit = max(1, int(grip_limit))
         self._fsr_limit = safe_limit
         self.fsr_bar.setRange(0, safe_limit)
-        self.fsr_bar.setValue(max(0, min(int(net), safe_limit)))
-        self.fsr_value_label.setText(
-            f"Pressure: {net} / {safe_limit} (Raw: {raw})"
-        )
         clamped_state = state if state in FSR_STATE_LABELS else 0
+        if clamped_state == 5:
+            self.fsr_bar.setValue(0)
+            self.fsr_value_label.setText(
+                "FSR disabled — follows active fingers on grip & slip"
+            )
+        else:
+            self.fsr_bar.setValue(max(0, min(int(net), safe_limit)))
+            self.fsr_value_label.setText(
+                f"Pressure: {net} / {safe_limit} (Raw: {raw})"
+            )
         if clamped_state != self._fsr_state:
             self._fsr_state = clamped_state
             self.fsr_state_badge.setObjectName(f"FsrState{clamped_state}")
@@ -280,7 +316,10 @@ class ServoCard(QFrame):
         self.set_angle(value)
 
     def _continuous_released(self) -> None:
+        prev = self._command
         self.set_angle(DEFAULT_ANGLE)
+        if prev != DEFAULT_ANGLE:
+            self.continuous_released.emit(self.channel, prev)
 
     def _update_continuous_display(self, value: int) -> None:
         if value == MIN_ANGLE:

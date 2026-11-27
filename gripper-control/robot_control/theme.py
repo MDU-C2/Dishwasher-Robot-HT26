@@ -184,8 +184,8 @@ QLabel#TypeBadgeCont {{
 }}
 
 QLabel#Off,
-QLabel#FsrState0, QLabel#OptState3, QLabel#LidarState3,
-QLabel#SlipState0, QLabel#SlipState6 {{
+QLabel#FsrState0, QLabel#FsrState5, QLabel#OptState3, QLabel#LidarState3,
+QLabel#SlipState0, QLabel#SlipState6, QLabel#SlipState7, QLabel#SlipState8 {{
     font-size: 11px;
     font-weight: 500;
     color: {muted};
@@ -532,10 +532,13 @@ QProgressBar::chunk {{
 }}
 
 QProgressBar[fsrState="0"]::chunk,
+QProgressBar[fsrState="5"]::chunk,
 QProgressBar[optState="3"]::chunk,
 QProgressBar[lidarState="3"]::chunk,
 QProgressBar[slipState="0"]::chunk,
-QProgressBar[slipState="6"]::chunk {{
+QProgressBar[slipState="6"]::chunk,
+QProgressBar[slipState="7"]::chunk,
+QProgressBar[slipState="8"]::chunk {{
     background: {rule_2};
 }}
 

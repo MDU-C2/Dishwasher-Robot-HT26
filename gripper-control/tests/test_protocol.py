@@ -24,13 +24,22 @@ class ProtocolTests(unittest.TestCase):
     def test_fsr_and_grip_commands(self):
         self.assertEqual(
             set_fsr_calibration(0, 150, 600, 1800, True),
-            "FSRCAL,0,150,600,1800,1\n",
+            "FSRCAL,0,150,600,1800,1,1\n",
         )
+        self.assertEqual(
+            set_fsr_calibration(2, 150, 600, 1800, False, False),
+            "FSRCAL,2,150,600,1800,0,0\n",
+        )
+        self.assertEqual(parse_line("SYNC,2,0\n"), ("SYNC", ["2", "0"]))
         self.assertEqual(set_fsr_guard(True), "FSRGUARD,1\n")
         self.assertEqual(set_fsr_guard(False), "FSRGUARD,0\n")
         self.assertEqual(tare_fsr(), "FSRTARE\n")
         self.assertEqual(grip_command("start"), "GRIP,START\n")
         self.assertEqual(grip_command("close_hold"), "GRIP,CLOSE_HOLD\n")
+        self.assertEqual(grip_command("arm"), "GRIP,ARM\n")
+        self.assertEqual(grip_command("release_hold"), "GRIP,RELEASE_HOLD\n")
+        self.assertEqual(grip_command("stop"), "GRIP,STOP\n")
+        self.assertEqual(parse_line("STALL,0,42\n"), ("STALL", ["0", "42"]))
         self.assertEqual(
             parse_line("FSR,10,200,650,15,205,655,0,1,2\n"),
             ("FSR", ["10", "200", "650", "15", "205", "655", "0", "1", "2"]),
@@ -48,15 +57,16 @@ class ProtocolTests(unittest.TestCase):
 
     def test_lidar_and_closed_loop_commands(self):
         self.assertEqual(
-            set_lidar_and_loop_config(60, 400, 40, 1200, 100, 60),
-            "LOOPCAL,60,400,40,1200,100,60,4000\n",
+            set_lidar_and_loop_config(60, 400, 40, 1200, 45, 25),
+            "LOOPCAL,60,400,40,1200,45,25,2200,14\n",
         )
         self.assertEqual(
-            set_lidar_and_loop_config(60, 400, 40, 1200, 100, 60, 4500),
-            "LOOPCAL,60,400,40,1200,100,60,4500\n",
+            set_lidar_and_loop_config(60, 400, 40, 1200, 45, 25, 4500, 30),
+            "LOOPCAL,60,400,40,1200,45,25,4500,30\n",
         )
-        self.assertEqual(set_auto_modes(True, True), "AUTOMODE,1,1\n")
-        self.assertEqual(set_auto_modes(False, True), "AUTOMODE,0,1\n")
+        self.assertEqual(set_auto_modes(True, True), "AUTOMODE,1,1,1\n")
+        self.assertEqual(set_auto_modes(True, False, True), "AUTOMODE,1,0,1\n")
+        self.assertEqual(set_auto_modes(False, False, False), "AUTOMODE,0,0,0\n")
         self.assertEqual(grip_command("release"), "GRIP,RELEASE\n")
         self.assertEqual(
             parse_line("LIDAR,45,12,1,3,200\n"),
@@ -69,6 +79,14 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(
             parse_line("SLIP,100,3,1,1\n"),
             ("SLIP", ["100", "3", "1", "1"]),
+        )
+        self.assertEqual(
+            parse_line("SLIP,0,8,0,0\n"),
+            ("SLIP", ["0", "8", "0", "0"]),
+        )
+        self.assertEqual(
+            parse_line("SLIP,0,7,0,0\n"),
+            ("SLIP", ["0", "7", "0", "0"]),
         )
 
     def test_empty_line(self):
